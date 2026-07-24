@@ -109,6 +109,30 @@
   .field-row .hint{ color:var(--txt2); font-size:11px; margin-top:4px; }
   .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
 
+  .paradas-block{ border-top:1px solid var(--border); padding-top:16px; margin-top:4px; }
+  .paradas-block > label{
+    display:block; font-size:12px; color:var(--txt2); text-transform:uppercase;
+    letter-spacing:.03em; margin-bottom:10px;
+  }
+  .paradas-list{ display:flex; flex-direction:column; gap:10px; margin-bottom:10px; }
+  .parada-row{
+    display:grid; grid-template-columns:1fr 1fr 2fr auto; gap:10px; align-items:end;
+    background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px;
+  }
+  .parada-row label{ display:block; font-size:11px; color:var(--txt2); margin-bottom:4px; }
+  .parada-row input, .parada-row select{
+    width:100%; background:var(--bg); border:1px solid var(--border); color:var(--txt);
+    border-radius:6px; padding:7px 8px; font-size:13px; font-family:inherit;
+  }
+  .parada-row .icon-btn{ padding:8px 10px; }
+  .parada-row-readonly{
+    grid-template-columns:1fr 1fr 1fr; background:transparent; align-items:center; font-size:13px;
+  }
+  .paradas-total{ font-size:13px; color:var(--txt2); margin:6px 0 14px; }
+  .paradas-total strong{ color:var(--txt); }
+  .paradas-existing{ margin-bottom:14px; }
+  .hint{ color:var(--txt2); font-size:12px; }
+
   #toastBox{ position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:8px; z-index:60; }
   .toast{
     background:var(--panel2); border:1px solid var(--border); border-left:4px solid var(--accent);
@@ -180,11 +204,22 @@
 <div class="overlay" id="newRecordOverlay">
   <div class="modal">
     <h3>Novo Registro</h3>
-    <div class="modal-sub">Cria uma linha na aba "Diario de Bordo". O Tempo de Parada é calculado automaticamente a partir de Hora Início/Fim.</div>
+    <div class="modal-sub">Cria uma linha na aba "Diario de Bordo". O Tempo de Parada é a soma das paradas lançadas abaixo (aba "PARADAS MAQ").</div>
     <form id="newRecordForm" class="field-grid"></form>
     <div class="modal-actions">
       <button type="button" class="btn" onclick="closeNewRecordModal()">Cancelar</button>
       <button type="button" class="btn btn-primary" id="newRecordSaveBtn" onclick="submitNewRecord()">Criar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="viewParadasOverlay">
+  <div class="modal" style="width:70vw; height:auto; max-height:80vh;">
+    <h3>Paradas do Registro</h3>
+    <div class="modal-sub" id="viewParadasSub"></div>
+    <div id="viewParadasBody" style="overflow:auto; flex:1;"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn" onclick="closeParadasViewModal()">Fechar</button>
     </div>
   </div>
 </div>
@@ -201,6 +236,29 @@ const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
 
 const TAB_MAIN = 'Diario de Bordo';
 const GID_MAIN = '1700278622';
+
+// Aba de apoio criada pelo usuário direto no Google Sheets para permitir
+// VÁRIOS lançamentos de parada (início/fim + código do motivo) por registro
+// do Diario de Bordo — em vez de um único intervalo início/fim por linha.
+// Colunas reais (A→E): HORA INICIO, HORA FIM, CODIGO PARADA, LINHA_DIARIO,
+// DURACAO (MIN). LINHA_DIARIO e DURACAO (MIN) foram adicionadas pelo
+// dashboard (não existiam quando o usuário criou a aba) para permitir somar
+// as paradas de cada registro de volta no Diario de Bordo — ver
+// COMPUTED_FIELDS['Tempo de Parada (min)'] abaixo.
+const TAB_PARADAS = 'PARADAS MAQ';
+const GID_PARADAS = '122577231';
+const FIELDS_PARADAS = ['HORA INICIO', 'HORA FIM', 'CODIGO PARADA', 'LINHA_DIARIO', 'DURACAO (MIN)'];
+const COMPUTED_FIELDS_PARADAS = {
+  'DURACAO (MIN)': '=IFERROR((INDIRECT("B"&ROW())-INDIRECT("A"&ROW()))*1440;"")',
+};
+
+// Aba de apoio (lista de motivos de parada), também criada pelo usuário.
+// Colunas: CODIGO, CATEGORIA 1, CATEGORIA 2 (OBS), USO. O dropdown de
+// "Código Parada" mostra "<codigo> - <categoria 1>" e grava esse texto
+// completo na coluna CODIGO PARADA da aba PARADAS MAQ (mesmo padrão dos
+// outros campos de lista suspensa: guarda o texto legível, não só o id).
+const TAB_CODIGO_PARADA = 'CODIGO PARADA';
+const GID_CODIGO_PARADA = '1991757817';
 
 const DROPDOWN_FIELDS = [
   { field: 'Turno', tab: 'Turno', gid: '73041352' },
@@ -237,7 +295,12 @@ const FIELDS_ALL = [
 // porque a fórmula nunca chega a compilar. Use 0 em vez de FALSE no último
 // argumento do VLOOKUP para evitar ter que traduzir o booleano (FALSO).
 const COMPUTED_FIELDS = {
-  'Tempo de Parada (min)': '=IFERROR((INDIRECT("F"&ROW())-INDIRECT("E"&ROW()))*1440;"")',
+  // Tempo de Parada (min) agora é a SOMA de todos os lançamentos da aba
+  // PARADAS MAQ vinculados a esta linha (coluna LINHA_DIARIO = número desta
+  // linha no Diario de Bordo) — não é mais um único intervalo Hora
+  // Inicio/Hora Fim desta mesma linha. Isso permite registrar várias paradas
+  // (com motivo) ao longo do turno e ver o total aqui automaticamente.
+  'Tempo de Parada (min)': '=IFERROR(SUMIF(\'PARADAS MAQ\'!$D:$D;ROW();\'PARADAS MAQ\'!$E:$E);0)',
   // META agora vem da aba "Metas" (Linha/Maquina -> Meta), por VLOOKUP na
   // Linha/Maquina desta mesma linha (coluna C) — não é mais digitado à mão,
   // nem no Novo Registro nem na edição. Para mudar a meta de uma máquina,
@@ -310,6 +373,12 @@ let ALL_ROWS = [];
 let RAW_MAIN_ROWS = []; // todas as linhas cruas (incluindo linhas-template em branco), usado para achar a próxima linha livre
 let lastRows = [];
 const OPTION_STORE = {};
+let RAW_PARADAS_ROWS = []; // linhas cruas da aba PARADAS MAQ, usado para listar as paradas já lançadas de um registro
+let CODIGO_PARADA_OPTIONS = []; // strings "<codigo> - <categoria 1>" para o dropdown de código de parada
+// Lançamentos de parada ainda não gravados, mantidos em memória enquanto o
+// modal de novo registro/edição está aberto — só viram linhas na aba
+// PARADAS MAQ quando o registro principal é salvo (um único botão de salvar).
+let pendingParadas = { new: [], edit: [] };
 
 // =====================================================================
 // Formatação
@@ -521,7 +590,7 @@ function renderTable(rows){
   const headRow = document.getElementById('tblMainHeadRow');
   headRow.innerHTML = COLUMNS.map(c =>
     `<th>${c.label}<br><span class="col-tag-th">(Coluna ${columnLetter(c.key)})</span></th>`
-  ).join('') + (editing ? '<th></th>' : '');
+  ).join('') + '<th></th>';
 
   const tbody = document.querySelector('#tblMain tbody');
   if (!rows.length){
@@ -535,9 +604,10 @@ function renderTable(rows){
       const content = c.badge ? badge(v, statusBadgeClass(v)) : (v || '—');
       return `<td${cls}>${content}</td>`;
     }).join('');
-    const actions = editing
-      ? `<td><button class="btn icon-btn" title="Editar" onclick="openEditModal(${r._row})">✏️</button></td>`
-      : '';
+    const actions = `<td>
+      <button class="btn icon-btn" title="Ver Paradas" onclick="openParadasViewModal(${r._row})">🕒</button>
+      ${editing ? `<button class="btn icon-btn" title="Editar" onclick="openEditModal(${r._row})">✏️</button>` : ''}
+    </td>`;
     const rowCls = effRowClass(r['Eff %']);
     return `<tr${rowCls ? ` class="${rowCls}"` : ''}>${cells}${actions}</tr>`;
   }).join('');
@@ -582,11 +652,115 @@ function readFormValues(form){
 }
 
 // =====================================================================
+// Paradas da Máquina (aba PARADAS MAQ) — múltiplas paradas por registro
+// =====================================================================
+// IDs das linhas de parada atualmente exibidas no modal (novo/edição),
+// enquanto o modal está aberto. Só viram linhas reais na aba PARADAS MAQ
+// quando o registro principal é salvo — um único botão de salvar grava o
+// registro no Diario de Bordo E as paradas lançadas no PARADAS MAQ.
+let paradaRowIds = { new: [], edit: [] };
+let paradaRowSeq = 0;
+
+function paradasSectionHtml(mode, existingHtml){
+  return `<div class="field-row full paradas-block">
+    <label>Paradas da Máquina</label>
+    ${existingHtml || ''}
+    <div class="paradas-list" id="paradasList_${mode}"></div>
+    <button type="button" class="btn" onclick="addParadaRow('${mode}')">+ Adicionar parada</button>
+  </div>`;
+}
+
+function addParadaRow(mode){
+  paradaRowIds[mode].push(++paradaRowSeq);
+  renderParadasRows(mode);
+}
+function removeParadaRow(mode, id){
+  paradaRowIds[mode] = paradaRowIds[mode].filter(x => x !== id);
+  renderParadasRows(mode);
+}
+function renderParadasRows(mode){
+  const list = document.getElementById('paradasList_' + mode);
+  if (!list) return;
+  list.innerHTML = paradaRowIds[mode].length
+    ? paradaRowIds[mode].map(id => paradaRowHtml(mode, id)).join('')
+    : '<div class="hint">Nenhuma parada adicionada ainda nesta edição.</div>';
+}
+function paradaRowHtml(mode, id){
+  const opts = CODIGO_PARADA_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
+  return `<div class="parada-row" id="paradaRow_${mode}_${id}">
+    <div><label>Início</label><input type="time" class="pr-inicio"></div>
+    <div><label>Fim</label><input type="time" class="pr-fim"></div>
+    <div><label>Código Parada</label><select class="pr-codigo"><option value="">Selecione…</option>${opts}</select></div>
+    <button type="button" class="btn icon-btn" title="Remover" onclick="removeParadaRow('${mode}', ${id})">✕</button>
+  </div>`;
+}
+// Lê os valores atuais direto do DOM (não mantemos estado espelhado em JS
+// para evitar dessincronia entre o array de ids e os inputs digitados).
+function collectParadaEntries(mode){
+  const entries = [];
+  paradaRowIds[mode].forEach(id => {
+    const row = document.getElementById(`paradaRow_${mode}_${id}`);
+    if (!row) return;
+    const inicio = row.querySelector('.pr-inicio').value;
+    const fim = row.querySelector('.pr-fim').value;
+    const codigo = row.querySelector('.pr-codigo').value;
+    if (inicio && fim) entries.push({ inicio, fim, codigo });
+  });
+  return entries;
+}
+// Monta o array de valores na ordem exata de FIELDS_PARADAS para um
+// lançamento de parada, vinculando-o à linha do Diario de Bordo.
+function buildRowValuesParadas(entry, linhaDiario){
+  const dataByField = {
+    'HORA INICIO': entry.inicio,
+    'HORA FIM': entry.fim,
+    'CODIGO PARADA': entry.codigo,
+    'LINHA_DIARIO': linhaDiario,
+  };
+  return FIELDS_PARADAS.map(f => (f in COMPUTED_FIELDS_PARADAS) ? COMPUTED_FIELDS_PARADAS[f] : (dataByField[f] ?? ''));
+}
+// Lista (read-only) das paradas já gravadas na aba PARADAS MAQ para uma
+// linha do Diario de Bordo, usada tanto no modal de edição quanto na
+// consulta "Ver Paradas".
+function existingParadasHtml(rowNum){
+  const linked = RAW_PARADAS_ROWS.filter(r => Number(r['LINHA_DIARIO']) === rowNum && r['HORA INICIO']);
+  if (!linked.length){
+    return '<div class="paradas-existing hint">Nenhuma parada lançada ainda para este registro.</div>';
+  }
+  const total = linked.reduce((s, r) => s + (num(r['DURACAO (MIN)']) || 0), 0);
+  const rows = linked.map(r => `<div class="parada-row parada-row-readonly">
+    <div>${r['HORA INICIO']} – ${r['HORA FIM']}</div>
+    <div>${r['CODIGO PARADA'] || '—'}</div>
+    <div>${fmtNum(num(r['DURACAO (MIN)']) || 0)} min</div>
+  </div>`).join('');
+  return `<div class="paradas-existing">${rows}<div class="paradas-total">Já lançado: <strong>${fmtNum(total)} min</strong></div></div>`;
+}
+
+// =====================================================================
+// Modal: consulta de paradas (botão "Ver Paradas" na tabela Detalhe)
+// =====================================================================
+function openParadasViewModal(rowNum){
+  const row = lastRows.find(r => r._row === rowNum);
+  const sub = row
+    ? `${row['Data'] || ''} · ${row['Turno'] || ''} · ${row['Linha/Maquina'] || ''} · ${row['Operador'] || ''}`
+    : '';
+  document.getElementById('viewParadasSub').textContent = sub;
+  document.getElementById('viewParadasBody').innerHTML = existingParadasHtml(rowNum);
+  document.getElementById('viewParadasOverlay').classList.add('open');
+}
+function closeParadasViewModal(){
+  document.getElementById('viewParadasOverlay').classList.remove('open');
+}
+
+// =====================================================================
 // Modal: novo registro
 // =====================================================================
 function openNewRecordModal(){
   const form = document.getElementById('newRecordForm');
-  form.innerHTML = FORM_FIELDS.map(field => fieldRowHtml(field, '', 'dl_new')).join('');
+  paradaRowIds.new = [];
+  form.innerHTML = FORM_FIELDS.map(field => fieldRowHtml(field, '', 'dl_new')).join('')
+    + paradasSectionHtml('new');
+  renderParadasRows('new');
   document.getElementById('newRecordOverlay').classList.add('open');
 }
 function closeNewRecordModal(){
@@ -598,10 +772,14 @@ async function submitNewRecord(){
   for (const field of FORM_FIELDS){
     await ensureListValue(field, data[field]);
   }
+  const paradaEntries = collectParadaEntries('new');
   try {
     const targetRow = nextEmptyRow();
     await updateRow(TAB_MAIN, targetRow, buildRowValues(data));
-    showToast('Registro criado.', true);
+    for (const p of paradaEntries){
+      await appendRow(GID_PARADAS, TAB_PARADAS, buildRowValuesParadas(p, targetRow));
+    }
+    showToast('Registro criado.' + (paradaEntries.length ? ` ${paradaEntries.length} parada(s) registrada(s).` : ''), true);
     closeNewRecordModal();
     await refresh();
   } catch (e) {
@@ -617,7 +795,10 @@ function openEditModal(rowNum){
   if (!row) return;
   const form = document.getElementById('editForm');
   form.dataset.row = rowNum;
-  form.innerHTML = FORM_FIELDS.map(field => fieldRowHtml(field, row[field] || '', 'dl_edit')).join('');
+  paradaRowIds.edit = [];
+  form.innerHTML = FORM_FIELDS.map(field => fieldRowHtml(field, row[field] || '', 'dl_edit')).join('')
+    + paradasSectionHtml('edit', existingParadasHtml(rowNum));
+  renderParadasRows('edit');
   document.getElementById('editOverlay').classList.add('open');
 }
 function closeEditModal(){
@@ -630,9 +811,13 @@ async function submitEdit(){
   for (const field of FORM_FIELDS){
     await ensureListValue(field, data[field]);
   }
+  const paradaEntries = collectParadaEntries('edit');
   try {
     await updateRow(TAB_MAIN, rowNum, buildRowValues(data));
-    showToast('Registro atualizado.', true);
+    for (const p of paradaEntries){
+      await appendRow(GID_PARADAS, TAB_PARADAS, buildRowValuesParadas(p, rowNum));
+    }
+    showToast('Registro atualizado.' + (paradaEntries.length ? ` ${paradaEntries.length} parada(s) registrada(s).` : ''), true);
     closeEditModal();
     await refresh();
   } catch (e) {
@@ -696,6 +881,8 @@ async function refresh(){
   try {
     const fetches = [fetch(csvUrl(GID_MAIN), {cache:'no-store'})];
     DROPDOWN_FIELDS.forEach(d => fetches.push(fetch(csvUrl(d.gid), {cache:'no-store'})));
+    fetches.push(fetch(csvUrl(GID_PARADAS), {cache:'no-store'}));
+    fetches.push(fetch(csvUrl(GID_CODIGO_PARADA), {cache:'no-store'}));
     const responses = await Promise.all(fetches);
 
     if (!responses[0].ok) throw new Error('Falha ao buscar dados da planilha');
@@ -713,6 +900,24 @@ async function refresh(){
       const parsed = parseCSV(await res.text());
       const col = parsed.headers[0];
       OPTION_STORE[DROPDOWN_FIELDS[i].field] = parsed.data.map(r => r[col]).filter(v => v);
+    }
+
+    // Aba PARADAS MAQ: lançamentos individuais de parada, vinculados a uma
+    // linha do Diario de Bordo via LINHA_DIARIO. Guardamos crua (RAW) para
+    // poder filtrar por LINHA_DIARIO tanto no modal de edição quanto na
+    // consulta de paradas por registro.
+    const paradasRes = responses[1 + DROPDOWN_FIELDS.length];
+    if (paradasRes && paradasRes.ok){
+      RAW_PARADAS_ROWS = parseCSV(await paradasRes.text()).data;
+    }
+    // Aba CODIGO PARADA: lista de motivos de parada — vira o dropdown
+    // "Código Parada" como "<codigo> - <categoria 1>".
+    const codigoRes = responses[2 + DROPDOWN_FIELDS.length];
+    if (codigoRes && codigoRes.ok){
+      const parsedCodigo = parseCSV(await codigoRes.text());
+      CODIGO_PARADA_OPTIONS = parsedCodigo.data
+        .filter(r => r['CODIGO'])
+        .map(r => `${r['CODIGO']} - ${r['CATEGORIA 1']}`);
     }
 
     document.getElementById('sourceLabel').textContent =
