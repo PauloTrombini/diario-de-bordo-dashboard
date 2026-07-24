@@ -232,13 +232,18 @@ const FIELDS_ALL = [
 // edição de uma linha existente.
 const COMPUTED_FIELDS = {
   'Tempo de Parada (min)': '=IFERROR((INDIRECT("F"&ROW())-INDIRECT("E"&ROW()))*1440,"")',
+  // META agora vem da aba "Metas" (Linha/Maquina -> Meta), por VLOOKUP na
+  // Linha/Maquina desta mesma linha (coluna C) — não é mais digitado à mão,
+  // nem no Novo Registro nem na edição. Para mudar a meta de uma máquina,
+  // edite a aba Metas uma vez; todas as linhas dessa máquina recalculam sozinhas.
+  'META': '=IFERROR(VLOOKUP(INDIRECT("C"&ROW()), Metas!A:B, 2, FALSE), "")',
   'Eff %': '=IFERROR(INDIRECT("I"&ROW())/INDIRECT("J"&ROW()),"")',
 };
 
 // Campos exibidos nos formulários de novo registro / edição (todos exceto os calculados).
 const FORM_FIELDS = FIELDS_ALL.filter(f => !(f in COMPUTED_FIELDS));
 const FIELD_TYPES = { 'Data': 'date', 'Hora Inicio': 'time', 'Hora Fim': 'time',
-  'Producao no Turno (Un)': 'number', 'META': 'number' };
+  'Producao no Turno (Un)': 'number' };
 const FIELD_TEXTAREA = ['Descricao da Ocorrencia', 'Causa Raiz', 'Acao Corretiva', 'Observacoes'];
 
 // Colunas exibidas na tabela principal, na mesma ordem real da planilha.
