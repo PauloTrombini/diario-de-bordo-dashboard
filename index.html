@@ -307,6 +307,7 @@ function effRowClass(v){
 let accessToken = null;
 let tokenClient = null;
 let ALL_ROWS = [];
+let RAW_MAIN_ROWS = []; // todas as linhas cruas (incluindo linhas-template em branco), usado para achar a próxima linha livre
 let lastRows = [];
 const OPTION_STORE = {};
 
@@ -387,6 +388,21 @@ function parseCSV(text){
 // =====================================================================
 // Sheets API
 // =====================================================================
+// A API :append do Sheets detecta a "tabela" olhando qualquer célula não-vazia
+// na aba inteira — inclusive linhas-template em branco cuja coluna de parada
+// calcula "0" via fórmula. Isso faz o :append pular dezenas de linhas em
+// branco e escrever bem mais abaixo (ex.: linha 43) em vez da próxima linha
+// realmente livre. Para o registro principal (Diario de Bordo) calculamos a
+// próxima linha livre nós mesmos, a partir de RAW_MAIN_ROWS (que inclui as
+// linhas-template), e escrevemos direto nela com updateRow (PUT), evitando o
+// :append para essa aba.
+function nextEmptyRow(){
+  const occupied = new Set(RAW_MAIN_ROWS.filter(r => r['Data']).map(r => r._row));
+  let row = 2; // linha 1 é o cabeçalho
+  while (occupied.has(row)) row++;
+  return row;
+}
+
 async function appendRow(gid, tabName, values){
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}:append?valueInputOption=USER_ENTERED`,
@@ -583,7 +599,8 @@ async function submitNewRecord(){
     await ensureListValue(field, data[field]);
   }
   try {
-    await appendRow(GID_MAIN, TAB_MAIN, buildRowValues(data));
+    const targetRow = nextEmptyRow();
+    await updateRow(TAB_MAIN, targetRow, buildRowValues(data));
     showToast('Registro criado.', true);
     closeNewRecordModal();
     await refresh();
@@ -687,6 +704,7 @@ async function refresh(){
     // (0-0)*1440), então o filtro genérico de linha-vazia do parseCSV não as
     // descarta. 'Data' é o campo que realmente identifica um registro real
     // aqui, então filtramos por ele.
+    RAW_MAIN_ROWS = parsedMain.data; // mantém as linhas-template em branco, usado por nextEmptyRow()
     ALL_ROWS = parsedMain.data.filter(r => r['Data']);
 
     for (let i = 0; i < DROPDOWN_FIELDS.length; i++){
