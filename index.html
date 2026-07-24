@@ -593,7 +593,11 @@ async function refresh(){
 
     if (!responses[0].ok) throw new Error('Falha ao buscar dados da planilha');
     const parsedMain = parseCSV(await responses[0].text());
-    ALL_ROWS = parsedMain.data;
+    // Linhas em branco do template calculam "0" na coluna de parada (formula
+    // (0-0)*1440), então o filtro genérico de linha-vazia do parseCSV não as
+    // descarta. 'Data' é o campo que realmente identifica um registro real
+    // aqui, então filtramos por ele.
+    ALL_ROWS = parsedMain.data.filter(r => r['Data']);
 
     for (let i = 0; i < DROPDOWN_FIELDS.length; i++){
       const res = responses[i+1];
