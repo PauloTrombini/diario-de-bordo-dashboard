@@ -75,16 +75,23 @@
   .overlay.open{ display:flex; }
   .modal{
     background:var(--panel); border:1px solid var(--border); border-radius:14px;
-    width:100%; max-width:640px; max-height:88vh; overflow:auto; padding:22px 24px;
+    width:90vw; height:90vh; max-width:none; overflow:auto; padding:26px 32px;
+    display:flex; flex-direction:column;
   }
   .modal h3{ margin:0 0 4px; font-size:17px; }
   .modal .modal-sub{ color:var(--txt2); font-size:13px; margin-bottom:18px; }
-  .field-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-  @media (max-width:560px){ .field-grid{ grid-template-columns:1fr; } }
+  .field-grid{
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));
+    gap:16px 20px; align-content:start; overflow:auto; flex:1;
+  }
+  @media (max-width:640px){ .field-grid{ grid-template-columns:1fr; } .modal{ width:96vw; height:94vh; padding:18px; } }
   .field-row.full{ grid-column:1 / -1; }
   .field-row label{
     display:block; font-size:12px; color:var(--txt2); text-transform:uppercase;
     letter-spacing:.03em; margin-bottom:6px;
+  }
+  .field-row label .col-tag{
+    text-transform:none; letter-spacing:0; color:var(--accent); font-weight:600; opacity:.85;
   }
   .field-row input, .field-row select, .field-row textarea{
     width:100%; background:var(--panel2); border:1px solid var(--border);
@@ -447,22 +454,32 @@ function renderTable(rows){
 // =====================================================================
 // Campo de formulário (dropdown / textarea / input tipado)
 // =====================================================================
+// Letra da coluna na planilha (A, B, C...), calculada pela posição real do
+// campo em FIELDS_ALL — sempre correta mesmo se a lista de campos mudar.
+function columnLetter(field){
+  const idx = FIELDS_ALL.indexOf(field);
+  return idx < 0 ? '' : String.fromCharCode(65 + idx);
+}
+function fieldLabel(field){
+  return `${field.replace('/', ' / ')} <span class="col-tag">(Coluna ${columnLetter(field)})</span>`;
+}
+
 function fieldRowHtml(field, currentValue, idPrefix){
   const dropdown = DROPDOWN_FIELDS.find(d => d.field === field);
   const val = currentValue != null ? currentValue : '';
   const full = FIELD_TEXTAREA.includes(field) ? ' full' : '';
   if (dropdown){
     const opts = (OPTION_STORE[field] || []).map(o => `<option value="${o}">`).join('');
-    return `<div class="field-row${full}"><label>${field.replace('/', ' / ')}</label>
+    return `<div class="field-row${full}"><label>${fieldLabel(field)}</label>
       <input list="${idPrefix}_${field}" name="${field}" value="${val}">
       <datalist id="${idPrefix}_${field}">${opts}</datalist></div>`;
   }
   if (FIELD_TEXTAREA.includes(field)){
-    return `<div class="field-row full"><label>${field.replace('/', ' / ')}</label>
+    return `<div class="field-row full"><label>${fieldLabel(field)}</label>
       <textarea name="${field}">${val}</textarea></div>`;
   }
   const type = FIELD_TYPES[field] || 'text';
-  return `<div class="field-row"><label>${field.replace('/', ' / ')}</label>
+  return `<div class="field-row"><label>${fieldLabel(field)}</label>
     <input type="${type}" name="${field}" value="${val}"></div>`;
 }
 
