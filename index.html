@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diário de Bordo — Máquinas</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root{
+    --bg:#0b0e17; --panel:#111726; --panel2:#171f33; --border:#232b42;
+    --txt:#e8ecf5; --txt2:#8f9ac0; --accent:#4f8cff; --green:#2fd08a;
+    --amber:#f5b942; --red:#f5615c;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--txt); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  html, body{ max-width:100%; overflow-x:hidden; }
+
+  header{
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
+    padding:18px 28px; border-bottom:1px solid var(--border);
+  }
+  header h1{ margin:0; font-size:19px; }
+  header .sub{ color:var(--txt2); font-size:12px; margin-top:2px; }
+  .right-controls{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .btn{
+    background:var(--panel2); border:1px solid var(--border); color:var(--txt);
+    border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer;
+  }
+  .btn:hover{ border-color:var(--accent); }
+  .btn-primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .badge-readonly{ background:rgba(143,154,192,.15); color:var(--txt2); padding:3px 9px; border-radius:20px; font-size:11px; margin-left:8px; }
+  .badge-edit{ background:rgba(47,208,138,.15); color:var(--green); padding:3px 9px; border-radius:20px; font-size:11px; margin-left:8px; }
+  .status{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--txt2); }
+  .dot{ width:9px; height:9px; border-radius:50%; background:var(--green); }
+  .dot.err{ background:var(--red); }
+
+  main{ padding:24px 28px 60px; max-width:1500px; margin:0 auto; }
+  .kpis{ display:grid; grid-template-columns:repeat(4, 1fr); gap:16px; margin-bottom:20px; }
+  .kpi{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; }
+  .kpi .label{ color:var(--txt2); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .kpi .value{ font-size:22px; font-weight:700; margin-top:6px; }
+  .kpi .value.pos{ color:var(--green); }
+  .kpi .value.warn{ color:var(--amber); }
+
+  .filters{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  .filters select{
+    background:var(--panel2); border:1px solid var(--border); color:var(--txt);
+    border-radius:8px; padding:8px 10px; font-size:13px; min-width:180px;
+  }
+
+  main > .panel{ margin-bottom:16px; }
+  .panel{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px; }
+  .panel h2{ margin:0 0 14px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--txt2); }
+
+  .table-scroll{ max-height:520px; overflow:auto; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th,td{ padding:9px 10px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th{ color:var(--txt2); font-weight:600; font-size:11px; text-transform:uppercase; position:sticky; top:0; background:var(--panel); }
+  tr:hover td{ background:var(--panel2); }
+  td.empty{ color:var(--txt2); text-align:center; padding:24px; }
+  td.wrap{ white-space:normal; max-width:220px; }
+
+  .badge{ display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; }
+  .badge.ok{ background:rgba(47,208,138,.15); color:var(--green); }
+  .badge.warn{ background:rgba(245,185,66,.15); color:var(--amber); }
+  .badge.pending{ background:rgba(79,140,255,.15); color:var(--accent); }
+  .badge.default{ background:rgba(143,154,192,.15); color:var(--txt2); }
+
+  .icon-btn{ padding:4px 6px; font-size:13px; line-height:1; }
+
+  .overlay{
+    display:none; position:fixed; inset:0; background:rgba(5,8,15,.65);
+    align-items:center; justify-content:center; z-index:50; padding:20px;
+  }
+  .overlay.open{ display:flex; }
+  .modal{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    width:100%; max-width:640px; max-height:88vh; overflow:auto; padding:22px 24px;
+  }
+  .modal h3{ margin:0 0 4px; font-size:17px; }
+  .modal .modal-sub{ color:var(--txt2); font-size:13px; margin-bottom:18px; }
+  .field-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:560px){ .field-grid{ grid-template-columns:1fr; } }
+  .field-row.full{ grid-column:1 / -1; }
+  .field-row label{
+    display:block; font-size:12px; color:var(--txt2); text-transform:uppercase;
+    letter-spacing:.03em; margin-bottom:6px;
+  }
+  .field-row input, .field-row select, .field-row textarea{
+    width:100%; background:var(--panel2); border:1px solid var(--border);
+    color:var(--txt); border-radius:8px; padding:9px 10px; font-size:14px; font-family:inherit;
+  }
+  .field-row textarea{ resize:vertical; min-height:52px; }
+  .field-row .hint{ color:var(--txt2); font-size:11px; margin-top:4px; }
+  .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
+
+  #toastBox{ position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:8px; z-index:60; }
+  .toast{
+    background:var(--panel2); border:1px solid var(--border); border-left:4px solid var(--accent);
+    color:var(--txt); padding:11px 16px; border-radius:8px; font-size:13px; max-width:340px;
+  }
+  .toast.ok{ border-left-color:var(--green); }
+  .toast.err{ border-left-color:var(--red); }
+
+  @media (max-width:640px){
+    header{ padding:14px 16px; }
+    main{ padding:14px 12px 40px; }
+    .kpis{ grid-template-columns:repeat(2, 1fr); gap:10px; }
+    .right-controls .btn{ flex:1 1 auto; text-align:center; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Diário de Bordo — Máquinas <span class="badge-readonly" id="modeBadge">SOMENTE LEITURA</span></h1>
+    <div class="sub" id="sourceLabel">carregando…</div>
+  </div>
+  <div class="right-controls">
+    <button class="btn" id="newRecordBtn" style="display:none;" onclick="openNewRecordModal()">+ Novo Registro</button>
+    <a href="https://docs.google.com/spreadsheets/d/1HNuF8KBf-k79imE2yNxkCeQKr9r6OyS84VdSHZCLTK0/edit" target="_blank" rel="noopener" id="manageAccessBtn" class="btn" style="text-decoration:none; display:none;">Gerenciar acessos</a>
+    <button class="btn" id="authBtn" onclick="handleAuthClick()">Entrar para editar</button>
+    <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">conectando…</span></div>
+  </div>
+</header>
+
+<main>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="panel">
+    <h2>Filtros</h2>
+    <div class="filters">
+      <select id="fLinha" onchange="renderAll()"><option value="">Linha/Máquina: todas</option></select>
+      <select id="fStatus" onchange="renderAll()"><option value="">Status: todos</option></select>
+      <select id="fTurno" onchange="renderAll()"><option value="">Turno: todos</option></select>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Detalhe</h2>
+    <div class="table-scroll">
+      <table id="tblMain">
+        <thead>
+          <tr id="tblMainHeadRow"></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<div class="overlay" id="editOverlay">
+  <div class="modal">
+    <h3 id="editTitle">Editar registro</h3>
+    <div class="modal-sub">As alterações são gravadas direto na planilha do Google Sheets.</div>
+    <form id="editForm" class="field-grid"></form>
+    <div class="modal-actions">
+      <button type="button" class="btn" onclick="closeEditModal()">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="saveBtn" onclick="submitEdit()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="newRecordOverlay">
+  <div class="modal">
+    <h3>Novo Registro</h3>
+    <div class="modal-sub">Cria uma linha na aba "Diario de Bordo". O Tempo de Parada é calculado automaticamente a partir de Hora Início/Fim.</div>
+    <form id="newRecordForm" class="field-grid"></form>
+    <div class="modal-actions">
+      <button type="button" class="btn" onclick="closeNewRecordModal()">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="newRecordSaveBtn" onclick="submitNewRecord()">Criar</button>
+    </div>
+  </div>
+</div>
+
+<div id="toastBox"></div>
+
+<script>
+// =====================================================================
+// CONFIG
+// =====================================================================
+const SHEET_ID = '1HNuF8KBf-k79imE2yNxkCeQKr9r6OyS84VdSHZCLTK0';
+const CLIENT_ID = '113586090122-onrmcr7i4gp4nltsuj3ic7hb24vcg8ih.apps.googleusercontent.com';
+const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
+
+const TAB_MAIN = 'Diario de Bordo';
+const GID_MAIN = '1700278622';
+
+const DROPDOWN_FIELDS = [
+  { field: 'Turno', tab: 'Turno', gid: '73041352' },
+  { field: 'Linha/Maquina', tab: 'Linha_Maquina', gid: '297370392' },
+  { field: 'Tipo de Ocorrencia', tab: 'Tipo_Ocorrencia', gid: '671082370' },
+  { field: 'Status', tab: 'Status', gid: '1536531895' },
+  { field: 'Responsavel', tab: 'Responsavel', gid: '1573059639' },
+];
+
+// Todas as colunas da aba principal, na ordem EXATA da planilha (necessário
+// para escrever linhas corretamente). 'Tempo de Parada (min)' é calculado
+// por fórmula e nunca é digitado pelo usuário — ver FORM_FIELDS abaixo.
+const FIELDS_ALL = [
+  'Data', 'Turno', 'Linha/Maquina', 'Operador', 'Hora Inicio', 'Hora Fim',
+  'Tempo de Parada (min)', 'Tipo de Ocorrencia', 'Descricao da Ocorrencia',
+  'Causa Raiz', 'Acao Corretiva', 'Status', 'Responsavel',
+  'Producao no Turno (Un)', 'Observacoes',
+];
+const DOWNTIME_FIELD = 'Tempo de Parada (min)';
+// Fórmula independente de linha (usa ROW()), funciona tanto para novos
+// registros (append) quanto para edições, sem precisar saber o número da
+// linha de antemão.
+const DOWNTIME_FORMULA = '=IFERROR((INDIRECT("F"&ROW())-INDIRECT("E"&ROW()))*1440,"")';
+
+// Campos exibidos nos formulários de novo registro / edição (todos exceto o calculado).
+const FORM_FIELDS = FIELDS_ALL.filter(f => f !== DOWNTIME_FIELD);
+const FIELD_TYPES = { 'Data': 'date', 'Hora Inicio': 'time', 'Hora Fim': 'time',
+  'Producao no Turno (Un)': 'number' };
+const FIELD_TEXTAREA = ['Descricao da Ocorrencia', 'Causa Raiz', 'Acao Corretiva', 'Observacoes'];
+
+// Colunas exibidas na tabela principal.
+const COLUMNS = [
+  { key: 'Data', label: 'Data' },
+  { key: 'Turno', label: 'Turno' },
+  { key: 'Linha/Maquina', label: 'Linha/Máquina' },
+  { key: 'Operador', label: 'Operador' },
+  { key: 'Hora Inicio', label: 'Início' },
+  { key: 'Hora Fim', label: 'Fim' },
+  { key: 'Tempo de Parada (min)', label: 'Parada (min)' },
+  { key: 'Tipo de Ocorrencia', label: 'Tipo de Ocorrência' },
+  { key: 'Descricao da Ocorrencia', label: 'Descrição', wrap: true },
+  { key: 'Causa Raiz', label: 'Causa Raiz', wrap: true },
+  { key: 'Acao Corretiva', label: 'Ação Corretiva', wrap: true },
+  { key: 'Status', label: 'Status', badge: true },
+  { key: 'Responsavel', label: 'Responsável' },
+  { key: 'Producao no Turno (Un)', label: 'Produção (Un)' },
+  { key: 'Observacoes', label: 'Observações', wrap: true },
+];
+
+// =====================================================================
+// Estado
+// =====================================================================
+let accessToken = null;
+let tokenClient = null;
+let ALL_ROWS = [];
+let lastRows = [];
+const OPTION_STORE = {};
+
+// =====================================================================
+// Formatação
+// =====================================================================
+const num = v => {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const n = Number(String(v).replace(/\./g, '').replace(',', '.'));
+  return Number.isNaN(n) ? Number(v) || null : n;
+};
+const fmtNum = (n, d=0) => n == null ? '—' : n.toLocaleString('pt-BR', {minimumFractionDigits:d, maximumFractionDigits:d});
+
+function parseISO(s){
+  if (!s) return null;
+  const m = String(s).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+}
+function fmtDateBR(d){
+  if (!d) return '—';
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+// =====================================================================
+// CSV
+// =====================================================================
+function csvUrl(gid){
+  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}&t=${Date.now()}`;
+}
+
+function parseCSV(text){
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++){
+    const c = text[i], next = text[i+1];
+    if (inQuotes){
+      if (c === '"' && next === '"'){ field += '"'; i++; }
+      else if (c === '"'){ inQuotes = false; }
+      else { field += c; }
+    } else {
+      if (c === '"'){ inQuotes = true; }
+      else if (c === ','){ row.push(field); field = ''; }
+      else if (c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c === '\r'){ /* skip */ }
+      else { field += c; }
+    }
+  }
+  if (field.length || row.length){ row.push(field); rows.push(row); }
+  if (!rows.length) return {headers: [], data: []};
+  const headers = rows[0];
+  const data = rows.slice(1).map((r, idx) => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h.trim()] = r[i] !== undefined ? r[i].trim() : '');
+    obj._row = idx + 2;
+    return obj;
+  }).filter(o => headers.some(h => o[h.trim()] !== ''));
+  return {headers: headers.map(h => h.trim()), data};
+}
+
+// =====================================================================
+// Sheets API
+// =====================================================================
+async function appendRow(gid, tabName, values){
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}:append?valueInputOption=USER_ENTERED`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [values] }),
+    }
+  );
+}
+
+async function updateRow(tabName, rowNum, values){
+  const lastCol = String.fromCharCode('A'.charCodeAt(0) + values.length - 1);
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!A${rowNum}:${lastCol}${rowNum}?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [values] }),
+    }
+  );
+}
+
+async function ensureListValue(field, value){
+  if (!value) return;
+  const cfg = DROPDOWN_FIELDS.find(d => d.field === field);
+  if (!cfg) return;
+  const current = OPTION_STORE[field] || [];
+  if (current.includes(value)) return;
+  await appendRow(cfg.gid, cfg.tab, [value]);
+  OPTION_STORE[field] = [...current, value];
+}
+
+// Monta o array de valores na ordem exata de FIELDS_ALL a partir de um
+// dicionário {campo: valor}, inserindo a fórmula de parada automaticamente.
+function buildRowValues(dataByField){
+  return FIELDS_ALL.map(f => f === DOWNTIME_FIELD ? DOWNTIME_FORMULA : (dataByField[f] ?? ''));
+}
+
+// =====================================================================
+// UI: badges, KPIs, toasts
+// =====================================================================
+function statusBadgeClass(v){
+  if (v === 'Resolvido') return 'ok';
+  if (v === 'Em Andamento') return 'pending';
+  if (v === 'Aberto') return 'warn';
+  return 'default';
+}
+function badge(value, cls){
+  return `<span class="badge ${cls || 'default'}">${value || '—'}</span>`;
+}
+function kpiCard(label, value, cls){
+  return `<div class="kpi"><div class="label">${label}</div><div class="value ${cls||''}">${value}</div></div>`;
+}
+function showToast(msg, ok){
+  const box = document.getElementById('toastBox');
+  const el = document.createElement('div');
+  el.className = 'toast ' + (ok ? 'ok' : 'err');
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+}
+
+// =====================================================================
+// Filtros + Render
+// =====================================================================
+function populateFilterOptions(){
+  const sel = (id, values) => {
+    const el = document.getElementById(id);
+    const current = el.value;
+    const opts = ['<option value="">' + el.options[0].textContent + '</option>']
+      .concat(values.map(v => `<option value="${v}">${v}</option>`));
+    el.innerHTML = opts.join('');
+    if (values.includes(current)) el.value = current;
+  };
+  sel('fLinha', [...new Set(ALL_ROWS.map(r => r['Linha/Maquina']).filter(Boolean))].sort());
+  sel('fStatus', [...new Set(ALL_ROWS.map(r => r['Status']).filter(Boolean))].sort());
+  sel('fTurno', [...new Set(ALL_ROWS.map(r => r['Turno']).filter(Boolean))].sort());
+}
+
+function applyFilters(rows){
+  const linha = document.getElementById('fLinha').value;
+  const status = document.getElementById('fStatus').value;
+  const turno = document.getElementById('fTurno').value;
+  return rows.filter(r =>
+    (!linha || r['Linha/Maquina'] === linha) &&
+    (!status || r['Status'] === status) &&
+    (!turno || r['Turno'] === turno)
+  );
+}
+
+function renderAll(){
+  const filtered = applyFilters(ALL_ROWS);
+  renderKPIs(filtered);
+  renderTable(filtered);
+}
+
+function renderKPIs(rows){
+  const totalParada = rows.reduce((s, r) => s + (num(r['Tempo de Parada (min)']) || 0), 0);
+  const abertas = rows.filter(r => r['Status'] && r['Status'] !== 'Resolvido').length;
+  const totalProducao = rows.reduce((s, r) => s + (num(r['Producao no Turno (Un)']) || 0), 0);
+  document.getElementById('kpis').innerHTML = [
+    kpiCard('Total de Registros', fmtNum(rows.length)),
+    kpiCard('Tempo de Parada Total (min)', fmtNum(totalParada), totalParada > 0 ? 'warn' : ''),
+    kpiCard('Ocorrências Abertas/Em Andamento', fmtNum(abertas), abertas > 0 ? 'warn' : 'pos'),
+    kpiCard('Produção Total no Turno (Un)', fmtNum(totalProducao), 'pos'),
+  ].join('');
+}
+
+function renderTable(rows){
+  lastRows = rows;
+  const editing = !!accessToken;
+  document.getElementById('newRecordBtn').style.display = editing ? '' : 'none';
+  document.getElementById('manageAccessBtn').style.display = editing ? '' : 'none';
+
+  const headRow = document.getElementById('tblMainHeadRow');
+  headRow.innerHTML = COLUMNS.map(c => `<th>${c.label}</th>`).join('') +
+    (editing ? '<th></th>' : '');
+
+  const tbody = document.querySelector('#tblMain tbody');
+  if (!rows.length){
+    tbody.innerHTML = `<tr><td colspan="${COLUMNS.length + 1}" class="empty">Nenhum dado encontrado.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const cells = COLUMNS.map(c => {
+      const v = r[c.key];
+      const cls = c.wrap ? ' class="wrap"' : '';
+      const content = c.badge ? badge(v, statusBadgeClass(v)) : (v || '—');
+      return `<td${cls}>${content}</td>`;
+    }).join('');
+    const actions = editing
+      ? `<td><button class="btn icon-btn" title="Editar" onclick="openEditModal(${r._row})">✏️</button></td>`
+      : '';
+    return `<tr>${cells}${actions}</tr>`;
+  }).join('');
+}
+
+// =====================================================================
+// Campo de formulário (dropdown / textarea / input tipado)
+// =====================================================================
+function fieldRowHtml(field, currentValue, idPrefix){
+  const dropdown = DROPDOWN_FIELDS.find(d => d.field === field);
+  const val = currentValue != null ? currentValue : '';
+  const full = FIELD_TEXTAREA.includes(field) ? ' full' : '';
+  if (dropdown){
+    const opts = (OPTION_STORE[field] || []).map(o => `<option value="${o}">`).join('');
+    return `<div class="field-row${full}"><label>${field.replace('/', ' / ')}</label>
+      <input list="${idPrefix}_${field}" name="${field}" value="${val}">
+      <datalist id="${idPrefix}_${field}">${opts}</datalist></div>`;
+  }
+  if (FIELD_TEXTAREA.includes(field)){
+    return `<div class="field-row full"><label>${field.replace('/', ' / ')}</label>
+      <textarea name="${field}">${val}</textarea></div>`;
+  }
+  const type = FIELD_TYPES[field] || 'text';
+  return `<div class="field-row"><label>${field.replace('/', ' / ')}</label>
+    <input type="${type}" name="${field}" value="${val}"></div>`;
+}
+
+function readFormValues(form){
+  const data = {};
+  for (const field of FORM_FIELDS){
+    const input = form.querySelector(`[name="${CSS.escape(field)}"]`);
+    data[field] = input ? input.value.trim() : '';
+  }
+  return data;
+}
+
+// =====================================================================
+// Modal: novo registro
+// =====================================================================
+function openNewRecordModal(){
+  const form = document.getElementById('newRecordForm');
+  form.innerHTML = FORM_FIELDS.map(field => fieldRowHtml(field, '', 'dl_new')).join('');
+  document.getElementById('newRecordOverlay').classList.add('open');
+}
+function closeNewRecordModal(){
+  document.getElementById('newRecordOverlay').classList.remove('open');
+}
+async function submitNewRecord(){
+  const form = document.getElementById('newRecordForm');
+  const data = readFormValues(form);
+  for (const field of FORM_FIELDS){
+    await ensureListValue(field, data[field]);
+  }
+  try {
+    await appendRow(GID_MAIN, TAB_MAIN, buildRowValues(data));
+    showToast('Registro criado.', true);
+    closeNewRecordModal();
+    await refresh();
+  } catch (e) {
+    showToast('Erro ao criar registro: ' + e.message, false);
+  }
+}
+
+// =====================================================================
+// Modal: editar registro existente
+// =====================================================================
+function openEditModal(rowNum){
+  const row = lastRows.find(r => r._row === rowNum);
+  if (!row) return;
+  const form = document.getElementById('editForm');
+  form.dataset.row = rowNum;
+  form.innerHTML = FORM_FIELDS.map(field => fieldRowHtml(field, row[field] || '', 'dl_edit')).join('');
+  document.getElementById('editOverlay').classList.add('open');
+}
+function closeEditModal(){
+  document.getElementById('editOverlay').classList.remove('open');
+}
+async function submitEdit(){
+  const form = document.getElementById('editForm');
+  const rowNum = Number(form.dataset.row);
+  const data = readFormValues(form);
+  for (const field of FORM_FIELDS){
+    await ensureListValue(field, data[field]);
+  }
+  try {
+    await updateRow(TAB_MAIN, rowNum, buildRowValues(data));
+    showToast('Registro atualizado.', true);
+    closeEditModal();
+    await refresh();
+  } catch (e) {
+    showToast('Erro ao salvar: ' + e.message, false);
+  }
+}
+
+// =====================================================================
+// Autenticação
+// =====================================================================
+function setEditingUI(on){
+  const badgeEl = document.getElementById('modeBadge');
+  const btn = document.getElementById('authBtn');
+  if (on){
+    badgeEl.textContent = 'MODO EDIÇÃO';
+    badgeEl.className = 'badge-edit';
+    btn.textContent = 'Sair do modo edição';
+  } else {
+    badgeEl.textContent = 'SOMENTE LEITURA';
+    badgeEl.className = 'badge-readonly';
+    btn.textContent = 'Entrar para editar';
+  }
+  renderTable(lastRows);
+}
+
+function initGis(){
+  if (typeof google === 'undefined' || !google.accounts) {
+    setTimeout(initGis, 300);
+    return;
+  }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (resp) => {
+      if (resp.error){
+        showToast('Não foi possível entrar: ' + resp.error, false);
+        return;
+      }
+      accessToken = resp.access_token;
+      setEditingUI(true);
+      showToast('Modo edição ativado.', true);
+    },
+  });
+}
+
+function handleAuthClick(){
+  if (accessToken){
+    google.accounts.oauth2.revoke(accessToken, () => {});
+    accessToken = null;
+    setEditingUI(false);
+    showToast('Modo edição desativado.', true);
+    return;
+  }
+  tokenClient.requestAccessToken();
+}
+
+// =====================================================================
+// Carregamento inicial + refresh periódico
+// =====================================================================
+async function refresh(){
+  try {
+    const fetches = [fetch(csvUrl(GID_MAIN), {cache:'no-store'})];
+    DROPDOWN_FIELDS.forEach(d => fetches.push(fetch(csvUrl(d.gid), {cache:'no-store'})));
+    const responses = await Promise.all(fetches);
+
+    if (!responses[0].ok) throw new Error('Falha ao buscar dados da planilha');
+    const parsedMain = parseCSV(await responses[0].text());
+    ALL_ROWS = parsedMain.data;
+
+    for (let i = 0; i < DROPDOWN_FIELDS.length; i++){
+      const res = responses[i+1];
+      if (!res.ok) continue;
+      const parsed = parseCSV(await res.text());
+      const col = parsed.headers[0];
+      OPTION_STORE[DROPDOWN_FIELDS[i].field] = parsed.data.map(r => r[col]).filter(v => v);
+    }
+
+    document.getElementById('sourceLabel').textContent =
+      `${ALL_ROWS.length} registros · atualizado ${new Date().toLocaleTimeString('pt-BR')}`;
+    document.getElementById('statusDot').className = 'dot';
+    document.getElementById('statusText').textContent = 'conectado';
+
+    populateFilterOptions();
+    renderAll();
+  } catch (e) {
+    document.getElementById('statusDot').className = 'dot err';
+    document.getElementById('statusText').textContent = 'erro ao conectar';
+    console.error(e);
+  }
+}
+
+initGis();
+refresh();
+setInterval(refresh, 60000);
+</script>
+
+</body>
+</html>
