@@ -56,9 +56,17 @@
   table{ width:100%; border-collapse:collapse; font-size:13px; }
   th,td{ padding:9px 10px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
   th{ color:var(--txt2); font-weight:600; font-size:11px; text-transform:uppercase; position:sticky; top:0; background:var(--panel); }
+  .col-tag-th{ color:var(--accent); font-weight:600; text-transform:none; letter-spacing:0; opacity:.85; font-size:10px; }
   tr:hover td{ background:var(--panel2); }
   td.empty{ color:var(--txt2); text-align:center; padding:24px; }
   td.wrap{ white-space:normal; max-width:220px; }
+  /* Cor de fundo da linha conforme Eff %: >=75% verde, 60-74,9% amarelo, <60% vermelho. */
+  tr.eff-good td{ background:rgba(47,208,138,.10); }
+  tr.eff-warn td{ background:rgba(245,185,66,.12); }
+  tr.eff-bad td{ background:rgba(245,97,92,.12); }
+  tr.eff-good:hover td{ background:rgba(47,208,138,.18); }
+  tr.eff-warn:hover td{ background:rgba(245,185,66,.2); }
+  tr.eff-bad:hover td{ background:rgba(245,97,92,.2); }
 
   .badge{ display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; }
   .badge.ok{ background:rgba(47,208,138,.15); color:var(--green); }
@@ -203,27 +211,37 @@ const DROPDOWN_FIELDS = [
 ];
 
 // Todas as colunas da aba principal, na ordem EXATA da planilha (necessário
-// para escrever linhas corretamente). 'Tempo de Parada (min)' é calculado
-// por fórmula e nunca é digitado pelo usuário — ver FORM_FIELDS abaixo.
+// para escrever linhas corretamente). Esta ordem foi ajustada manualmente
+// pelo usuário direto no Google Sheets (colunas reordenadas + META/Eff %
+// adicionadas) — sempre confira o cabeçalho real da planilha antes de mudar
+// esta lista, não assuma que ela ainda bate com uma versão anterior do
+// dashboard. 'Tempo de Parada (min)' e 'Eff %' são calculados por fórmula e
+// nunca são digitados pelo usuário — ver FORM_FIELDS abaixo.
 const FIELDS_ALL = [
   'Data', 'Turno', 'Linha/Maquina', 'Operador', 'Hora Inicio', 'Hora Fim',
-  'Tempo de Parada (min)', 'Tipo de Ocorrencia', 'Descricao da Ocorrencia',
-  'Causa Raiz', 'Acao Corretiva', 'Status', 'Responsavel',
-  'Producao no Turno (Un)', 'Observacoes',
+  'Tempo de Parada (min)', 'Tipo de Ocorrencia', 'Producao no Turno (Un)',
+  'META', 'Observacoes', 'Eff %', 'Descricao da Ocorrencia', 'Causa Raiz',
+  'Acao Corretiva', 'Status', 'Responsavel',
 ];
-const DOWNTIME_FIELD = 'Tempo de Parada (min)';
-// Fórmula independente de linha (usa ROW()), funciona tanto para novos
-// registros (append) quanto para edições, sem precisar saber o número da
-// linha de antemão.
-const DOWNTIME_FORMULA = '=IFERROR((INDIRECT("F"&ROW())-INDIRECT("E"&ROW()))*1440,"")';
 
-// Campos exibidos nos formulários de novo registro / edição (todos exceto o calculado).
-const FORM_FIELDS = FIELDS_ALL.filter(f => f !== DOWNTIME_FIELD);
+// Campos calculados por fórmula na própria planilha — nunca aparecem nos
+// formulários de novo registro/edição, e o dashboard escreve a fórmula (não
+// um valor) nessas colunas sempre que grava uma linha nova ou editada.
+// Fórmulas usam ROW() em vez do número de linha fixo, então funcionam tanto
+// para append (linha nova, número desconhecido antes de gravar) quanto para
+// edição de uma linha existente.
+const COMPUTED_FIELDS = {
+  'Tempo de Parada (min)': '=IFERROR((INDIRECT("F"&ROW())-INDIRECT("E"&ROW()))*1440,"")',
+  'Eff %': '=IFERROR(INDIRECT("I"&ROW())/INDIRECT("J"&ROW()),"")',
+};
+
+// Campos exibidos nos formulários de novo registro / edição (todos exceto os calculados).
+const FORM_FIELDS = FIELDS_ALL.filter(f => !(f in COMPUTED_FIELDS));
 const FIELD_TYPES = { 'Data': 'date', 'Hora Inicio': 'time', 'Hora Fim': 'time',
-  'Producao no Turno (Un)': 'number' };
+  'Producao no Turno (Un)': 'number', 'META': 'number' };
 const FIELD_TEXTAREA = ['Descricao da Ocorrencia', 'Causa Raiz', 'Acao Corretiva', 'Observacoes'];
 
-// Colunas exibidas na tabela principal.
+// Colunas exibidas na tabela principal, na mesma ordem real da planilha.
 const COLUMNS = [
   { key: 'Data', label: 'Data' },
   { key: 'Turno', label: 'Turno' },
@@ -233,14 +251,41 @@ const COLUMNS = [
   { key: 'Hora Fim', label: 'Fim' },
   { key: 'Tempo de Parada (min)', label: 'Parada (min)' },
   { key: 'Tipo de Ocorrencia', label: 'Tipo de Ocorrência' },
+  { key: 'Producao no Turno (Un)', label: 'Produção (Un)' },
+  { key: 'META', label: 'Meta' },
+  { key: 'Observacoes', label: 'Observações', wrap: true },
+  { key: 'Eff %', label: 'Eff %' },
   { key: 'Descricao da Ocorrencia', label: 'Descrição', wrap: true },
   { key: 'Causa Raiz', label: 'Causa Raiz', wrap: true },
   { key: 'Acao Corretiva', label: 'Ação Corretiva', wrap: true },
   { key: 'Status', label: 'Status', badge: true },
   { key: 'Responsavel', label: 'Responsável' },
-  { key: 'Producao no Turno (Un)', label: 'Produção (Un)' },
-  { key: 'Observacoes', label: 'Observações', wrap: true },
 ];
+
+// Letra da coluna na planilha (A, B, C...), pela posição real em FIELDS_ALL.
+function columnLetter(field){
+  const idx = FIELDS_ALL.indexOf(field);
+  return idx < 0 ? '' : String.fromCharCode(65 + idx);
+}
+
+// Faixas de cor da linha conforme o Eff % (col. Eff %): >75% verde,
+// 60%–74,9% amarelo, <60% vermelho. Aceita "107,33%" ou "0.75" etc.
+function effRatio(v){
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const cleaned = String(v).trim().replace('%', '').replace(/\./g, '').replace(',', '.');
+  const n = Number(cleaned);
+  if (Number.isNaN(n)) return null;
+  // Se o valor já veio como fração (ex: 0.75 sem "%"), trata como fração;
+  // caso contrário assume que já é percentual (ex: "75" ou "107,33").
+  return String(v).includes('%') || Math.abs(n) > 1.5 ? n : n * 100;
+}
+function effRowClass(v){
+  const pct = effRatio(v);
+  if (pct == null) return '';
+  if (pct >= 75) return 'eff-good';
+  if (pct >= 60) return 'eff-warn';
+  return 'eff-bad';
+}
 
 // =====================================================================
 // Estado
@@ -349,7 +394,7 @@ async function ensureListValue(field, value){
 // Monta o array de valores na ordem exata de FIELDS_ALL a partir de um
 // dicionário {campo: valor}, inserindo a fórmula de parada automaticamente.
 function buildRowValues(dataByField){
-  return FIELDS_ALL.map(f => f === DOWNTIME_FIELD ? DOWNTIME_FORMULA : (dataByField[f] ?? ''));
+  return FIELDS_ALL.map(f => (f in COMPUTED_FIELDS) ? COMPUTED_FIELDS[f] : (dataByField[f] ?? ''));
 }
 
 // =====================================================================
@@ -429,8 +474,9 @@ function renderTable(rows){
   document.getElementById('manageAccessBtn').style.display = editing ? '' : 'none';
 
   const headRow = document.getElementById('tblMainHeadRow');
-  headRow.innerHTML = COLUMNS.map(c => `<th>${c.label}</th>`).join('') +
-    (editing ? '<th></th>' : '');
+  headRow.innerHTML = COLUMNS.map(c =>
+    `<th>${c.label}<br><span class="col-tag-th">(Coluna ${columnLetter(c.key)})</span></th>`
+  ).join('') + (editing ? '<th></th>' : '');
 
   const tbody = document.querySelector('#tblMain tbody');
   if (!rows.length){
@@ -447,19 +493,14 @@ function renderTable(rows){
     const actions = editing
       ? `<td><button class="btn icon-btn" title="Editar" onclick="openEditModal(${r._row})">✏️</button></td>`
       : '';
-    return `<tr>${cells}${actions}</tr>`;
+    const rowCls = effRowClass(r['Eff %']);
+    return `<tr${rowCls ? ` class="${rowCls}"` : ''}>${cells}${actions}</tr>`;
   }).join('');
 }
 
 // =====================================================================
 // Campo de formulário (dropdown / textarea / input tipado)
 // =====================================================================
-// Letra da coluna na planilha (A, B, C...), calculada pela posição real do
-// campo em FIELDS_ALL — sempre correta mesmo se a lista de campos mudar.
-function columnLetter(field){
-  const idx = FIELDS_ALL.indexOf(field);
-  return idx < 0 ? '' : String.fromCharCode(65 + idx);
-}
 function fieldLabel(field){
   return `${field.replace('/', ' / ')} <span class="col-tag">(Coluna ${columnLetter(field)})</span>`;
 }
