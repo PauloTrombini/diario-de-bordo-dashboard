@@ -230,14 +230,20 @@ const FIELDS_ALL = [
 // Fórmulas usam ROW() em vez do número de linha fixo, então funcionam tanto
 // para append (linha nova, número desconhecido antes de gravar) quanto para
 // edição de uma linha existente.
+// IMPORTANTE: esta planilha usa locale pt-BR (decimal com vírgula), e nesse
+// locale o Google Sheets exige ";" como separador de argumentos de função
+// em vez de ",". Uma fórmula escrita com "," (sintaxe en-US) é rejeitada na
+// hora de salvar e a célula mostra "#ERROR!" — IFERROR não pega esse caso
+// porque a fórmula nunca chega a compilar. Use 0 em vez de FALSE no último
+// argumento do VLOOKUP para evitar ter que traduzir o booleano (FALSO).
 const COMPUTED_FIELDS = {
-  'Tempo de Parada (min)': '=IFERROR((INDIRECT("F"&ROW())-INDIRECT("E"&ROW()))*1440,"")',
+  'Tempo de Parada (min)': '=IFERROR((INDIRECT("F"&ROW())-INDIRECT("E"&ROW()))*1440;"")',
   // META agora vem da aba "Metas" (Linha/Maquina -> Meta), por VLOOKUP na
   // Linha/Maquina desta mesma linha (coluna C) — não é mais digitado à mão,
   // nem no Novo Registro nem na edição. Para mudar a meta de uma máquina,
   // edite a aba Metas uma vez; todas as linhas dessa máquina recalculam sozinhas.
-  'META': '=IFERROR(VLOOKUP(INDIRECT("C"&ROW()), Metas!A:B, 2, FALSE), "")',
-  'Eff %': '=IFERROR(INDIRECT("I"&ROW())/INDIRECT("J"&ROW()),"")',
+  'META': '=IFERROR(VLOOKUP(INDIRECT("C"&ROW());Metas!A:B;2;0);"")',
+  'Eff %': '=IFERROR(INDIRECT("I"&ROW())/INDIRECT("J"&ROW());"")',
 };
 
 // Campos exibidos nos formulários de novo registro / edição (todos exceto os calculados).
@@ -246,7 +252,10 @@ const FIELD_TYPES = { 'Data': 'date', 'Hora Inicio': 'time', 'Hora Fim': 'time',
   'Producao no Turno (Un)': 'number' };
 const FIELD_TEXTAREA = ['Descricao da Ocorrencia', 'Causa Raiz', 'Acao Corretiva', 'Observacoes'];
 
-// Colunas exibidas na tabela principal, na mesma ordem real da planilha.
+// Colunas exibidas na tabela principal — ordem de EXIBIÇÃO escolhida pelo
+// usuário (diferente da ordem real das colunas na planilha). A letra da
+// coluna mostrada no cabeçalho (via columnLetter) continua batendo com a
+// posição real em FIELDS_ALL, não com a ordem desta lista.
 const COLUMNS = [
   { key: 'Data', label: 'Data' },
   { key: 'Turno', label: 'Turno' },
@@ -254,12 +263,12 @@ const COLUMNS = [
   { key: 'Operador', label: 'Operador' },
   { key: 'Hora Inicio', label: 'Início' },
   { key: 'Hora Fim', label: 'Fim' },
-  { key: 'Tempo de Parada (min)', label: 'Parada (min)' },
-  { key: 'Tipo de Ocorrencia', label: 'Tipo de Ocorrência' },
   { key: 'Producao no Turno (Un)', label: 'Produção (Un)' },
   { key: 'META', label: 'Meta' },
-  { key: 'Observacoes', label: 'Observações', wrap: true },
   { key: 'Eff %', label: 'Eff %' },
+  { key: 'Tempo de Parada (min)', label: 'Parada (min)' },
+  { key: 'Tipo de Ocorrencia', label: 'Tipo de Ocorrência' },
+  { key: 'Observacoes', label: 'Observações', wrap: true },
   { key: 'Descricao da Ocorrencia', label: 'Descrição', wrap: true },
   { key: 'Causa Raiz', label: 'Causa Raiz', wrap: true },
   { key: 'Acao Corretiva', label: 'Ação Corretiva', wrap: true },
@@ -322,6 +331,21 @@ function fmtDateBR(d){
   const dd = String(d.getDate()).padStart(2,'0');
   const mm = String(d.getMonth()+1).padStart(2,'0');
   return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+// <input type="date"> só aceita/retorna "YYYY-MM-DD" (ISO), mas a planilha
+// guarda a Data como texto "DD/MM/AAAA" — sem essa conversão nos dois
+// sentidos, o campo de data aparece em branco ao editar um registro
+// existente, e uma linha nova grava a data em formato diferente da coluna.
+function brToISO(br){
+  const m = String(br).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return br;
+  return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+}
+function isoToBRStr(iso){
+  const m = String(iso).trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso;
+  return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
 // =====================================================================
@@ -525,15 +549,18 @@ function fieldRowHtml(field, currentValue, idPrefix){
       <textarea name="${field}">${val}</textarea></div>`;
   }
   const type = FIELD_TYPES[field] || 'text';
+  const inputVal = type === 'date' ? brToISO(val) : val;
   return `<div class="field-row"><label>${fieldLabel(field)}</label>
-    <input type="${type}" name="${field}" value="${val}"></div>`;
+    <input type="${type}" name="${field}" value="${inputVal}"></div>`;
 }
 
 function readFormValues(form){
   const data = {};
   for (const field of FORM_FIELDS){
     const input = form.querySelector(`[name="${CSS.escape(field)}"]`);
-    data[field] = input ? input.value.trim() : '';
+    let value = input ? input.value.trim() : '';
+    if (FIELD_TYPES[field] === 'date' && value) value = isoToBRStr(value);
+    data[field] = value;
   }
   return data;
 }
