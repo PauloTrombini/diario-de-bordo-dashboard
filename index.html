@@ -260,24 +260,31 @@ const COMPUTED_FIELDS_PARADAS = {
 const TAB_CODIGO_PARADA = 'CODIGO PARADA';
 const GID_CODIGO_PARADA = '1991757817';
 
+// 'Tipo de Ocorrencia' foi REMOVIDO da aba principal pelo usuário direto no
+// Google Sheets (o motivo da parada agora é lançado por evento, via "Código
+// Parada" na aba PARADAS MAQ, em vez de um único campo por registro) —
+// confirmado inspecionando o cabeçalho real da aba em 2026-07-24. Removido
+// daqui e de FIELDS_ALL/COLUMNS também; a aba de apoio 'Tipo_Ocorrencia'
+// continua existindo na planilha mas não é mais referenciada pelo dashboard.
 const DROPDOWN_FIELDS = [
   { field: 'Turno', tab: 'Turno', gid: '73041352' },
   { field: 'Linha/Maquina', tab: 'Linha_Maquina', gid: '297370392' },
-  { field: 'Tipo de Ocorrencia', tab: 'Tipo_Ocorrencia', gid: '671082370' },
   { field: 'Status', tab: 'Status', gid: '1536531895' },
   { field: 'Responsavel', tab: 'Responsavel', gid: '1573059639' },
 ];
 
 // Todas as colunas da aba principal, na ordem EXATA da planilha (necessário
 // para escrever linhas corretamente). Esta ordem foi ajustada manualmente
-// pelo usuário direto no Google Sheets (colunas reordenadas + META/Eff %
-// adicionadas) — sempre confira o cabeçalho real da planilha antes de mudar
-// esta lista, não assuma que ela ainda bate com uma versão anterior do
-// dashboard. 'Tempo de Parada (min)' e 'Eff %' são calculados por fórmula e
-// nunca são digitados pelo usuário — ver FORM_FIELDS abaixo.
+// pelo usuário direto no Google Sheets — sempre confira o cabeçalho real da
+// planilha antes de mudar esta lista, não assuma que ela ainda bate com uma
+// versão anterior do dashboard (a coluna 'Tipo de Ocorrencia' foi removida
+// nesta última mudança, deslocando tudo depois de 'Tempo de Parada (min)'
+// uma posição para a esquerda). 'Tempo de Parada (min)', 'META' e 'Eff %'
+// são calculados por fórmula e nunca são digitados pelo usuário — ver
+// FORM_FIELDS abaixo.
 const FIELDS_ALL = [
   'Data', 'Turno', 'Linha/Maquina', 'Operador', 'Hora Inicio', 'Hora Fim',
-  'Tempo de Parada (min)', 'Tipo de Ocorrencia', 'Producao no Turno (Un)',
+  'Tempo de Parada (min)', 'Producao no Turno (Un)',
   'META', 'Observacoes', 'Eff %', 'Descricao da Ocorrencia', 'Causa Raiz',
   'Acao Corretiva', 'Status', 'Responsavel',
 ];
@@ -306,7 +313,12 @@ const COMPUTED_FIELDS = {
   // nem no Novo Registro nem na edição. Para mudar a meta de uma máquina,
   // edite a aba Metas uma vez; todas as linhas dessa máquina recalculam sozinhas.
   'META': '=IFERROR(VLOOKUP(INDIRECT("C"&ROW());Metas!A:B;2;0);"")',
-  'Eff %': '=IFERROR(INDIRECT("I"&ROW())/INDIRECT("J"&ROW());"")',
+  // Referencia Producao no Turno (H) e META (I) pela posição ATUAL em
+  // FIELDS_ALL, não por letra fixa — depois da remoção de 'Tipo de
+  // Ocorrencia' as colunas deslocaram uma posição e INDIRECT("I"...) não se
+  // ajusta sozinho (é uma referência por string, diferente de =H2/I2 que o
+  // Sheets ajusta automaticamente ao apagar uma coluna).
+  'Eff %': `=IFERROR(INDIRECT("${columnLetter('Producao no Turno (Un)')}"&ROW())/INDIRECT("${columnLetter('META')}"&ROW());"")`,
 };
 
 // Campos exibidos nos formulários de novo registro / edição (todos exceto os calculados).
@@ -330,7 +342,6 @@ const COLUMNS = [
   { key: 'META', label: 'Meta' },
   { key: 'Eff %', label: 'Eff %' },
   { key: 'Tempo de Parada (min)', label: 'Parada (min)' },
-  { key: 'Tipo de Ocorrencia', label: 'Tipo de Ocorrência' },
   { key: 'Observacoes', label: 'Observações', wrap: true },
   { key: 'Descricao da Ocorrencia', label: 'Descrição', wrap: true },
   { key: 'Causa Raiz', label: 'Causa Raiz', wrap: true },
