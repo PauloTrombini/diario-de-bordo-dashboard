@@ -93,11 +93,13 @@ tr.eff-bad:hover td{ background:rgba(245,97,92,.2); }
 .panel-light .btn:hover{ border-color:var(--accent); }
 .panel-light .col-tag-th{ opacity:.9; }
 
-/* Painel "Produção x Meta por Máquina" (gráfico de barras horizontal) e seu
-   botão de tela cheia. Em vez de depender só da Fullscreen API do navegador
+/* Painéis de gráfico (Produção x Meta, Pareto de Paradas, ...) e o botão de
+   tela cheia deles. Em vez de depender só da Fullscreen API do navegador
    (que pode ser bloqueada em alguns contextos), o botão alterna uma classe
    que transforma o painel num overlay fixo cobrindo a tela inteira — mais
-   confiável — e tenta a Fullscreen API real por cima, quando disponível. */
+   confiável — e tenta a Fullscreen API real por cima, quando disponível.
+   Classe genérica (não presa a um id específico) pra funcionar em
+   qualquer painel de gráfico que a use. */
 .chart-panel-head{
 display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px;
 }
@@ -105,11 +107,11 @@ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap;
 .chart-panel-controls{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .chart-canvas-wrap{ position:relative; height:380px; }
 .chart-canvas-wrap .empty{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
-#panelChartProducaoMeta.chart-panel-fullscreen{
+.panel.chart-panel-fullscreen{
 position:fixed; inset:0; z-index:200; margin:0; border-radius:0;
 overflow:auto; padding:24px 28px; background:var(--bg);
 }
-#panelChartProducaoMeta.chart-panel-fullscreen .chart-canvas-wrap{ height:calc(100vh - 140px); }
+.panel.chart-panel-fullscreen .chart-canvas-wrap{ height:calc(100vh - 140px); }
 
 .badge{ display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; }
 .badge.ok{ background:rgba(47,208,138,.15); color:var(--green); }
@@ -224,6 +226,7 @@ main{ padding:14px 12px 40px; }
 <div class="filters">
 <select id="fLinha" onchange="renderAll()"><option value="">Linha/Máquina: todas</option></select>
 <select id="fOperador" onchange="renderAll()"><option value="">Operador: todos</option></select>
+<select id="fOrdemProducao" onchange="renderAll()"><option value="">Ordem de Produção: todas</option></select>
 <span class="filter-label">Data</span>
 <input type="date" id="fData" onchange="renderAll()">
 <select id="fPeriodo" onchange="renderAll()">
@@ -236,11 +239,34 @@ main{ padding:14px 12px 40px; }
 </div>
 
 <div class="panel panel-light">
-<h2>Detalhe</h2>
+<h2>Detalhe Diário de Bordo</h2>
 <div class="table-scroll">
-<table id="tblMain">
+<table id="tblDetalhe">
 <thead>
-<tr id="tblMainHeadRow"></tr>
+<tr id="tblDetalheHeadRow"></tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+</div>
+
+<div class="panel panel-light">
+<div class="chart-panel-head">
+<h2>TPM</h2>
+<div class="chart-panel-controls">
+<select id="fTpmPeriodo" onchange="renderTpmTable()">
+<option value="todos">Período: todos</option>
+<option value="dia">Dia</option>
+<option value="semana">Semana</option>
+<option value="mes" selected>Mês</option>
+</select>
+<input type="date" id="fTpmData" onchange="renderTpmTable()">
+</div>
+</div>
+<div class="table-scroll">
+<table id="tblTpm">
+<thead>
+<tr id="tblTpmHeadRow"></tr>
 </thead>
 <tbody></tbody>
 </table>
@@ -276,12 +302,31 @@ main{ padding:14px 12px 40px; }
 <option value="mes" selected>Mês</option>
 </select>
 <input type="date" id="fChartData" onchange="renderProducaoMetaChart()">
-<button class="btn" id="btnChartFullscreen" onclick="toggleChartFullscreen()">⛶ Tela cheia</button>
+<button class="btn" id="btnChartFullscreen" onclick="toggleChartFullscreen('panelChartProducaoMeta','btnChartFullscreen', () => chartProducaoMeta)">⛶ Tela cheia</button>
 </div>
 </div>
 <div class="chart-canvas-wrap">
 <canvas id="chartProducaoMeta"></canvas>
 <div id="chartEmptyMsg" class="empty hint" style="display:none;">Nenhum dado para o período selecionado.</div>
+</div>
+</div>
+
+<div class="panel" id="panelChartPareto">
+<div class="chart-panel-head">
+<h2>Pareto de Paradas</h2>
+<div class="chart-panel-controls">
+<select id="fParetoPeriodo" onchange="renderParetoChart()">
+<option value="dia">Dia</option>
+<option value="semana">Semana</option>
+<option value="mes" selected>Mês</option>
+</select>
+<input type="date" id="fParetoData" onchange="renderParetoChart()">
+<button class="btn" id="btnParetoFullscreen" onclick="toggleChartFullscreen('panelChartPareto','btnParetoFullscreen', () => chartPareto)">⛶ Tela cheia</button>
+</div>
+</div>
+<div class="chart-canvas-wrap">
+<canvas id="chartPareto"></canvas>
+<div id="paretoEmptyMsg" class="empty hint" style="display:none;">Nenhuma parada encontrada para o período selecionado.</div>
 </div>
 </div>
 </main>
@@ -388,11 +433,22 @@ const DROPDOWN_FIELDS = [
 // início/fim do registro inteiro deixou de fazer sentido/ser usado).
 // 'Tempo de Parada (min)', 'META' e 'Eff %' são calculados por fórmula e
 // nunca são digitados pelo usuário — ver FORM_FIELDS abaixo.
+// 'Hora Inicio OP', 'Hora Fim OP' e 'Disponibilidade (horas)' foram
+// adicionadas em 2026-07-27 (colunas O, P, Q) — sempre no FINAL da lista,
+// de propósito: colocá-las no meio (ex.: logo depois de "Ordem de
+// produção") deslocaria as colunas de A a N e quebraria as fórmulas that
+// dependem de posição fixa. Elas registram quando a Ordem de Produção
+// começou/terminou NESTE turno/registro (preenchido pelo operador) e o
+// tempo total (Disponibilidade) é calculado por fórmula — ver
+// COMPUTED_FIELDS abaixo. A ORDEM DE EXIBIÇÃO delas no formulário (perto de
+// "Ordem de produção", não no fim) é controlada separadamente por
+// FORM_FIELDS_BEFORE_OBS, não por esta lista.
 const FIELDS_ALL = [
 'Data', 'Ordem de produção', 'Linha/Maquina', 'Operador',
 'Tempo de Parada (min)', 'Producao no Turno (Un)',
 'META', 'Observacoes', 'Eff %', 'Descricao da Ocorrencia', 'Causa Raiz',
 'Acao Corretiva', 'Status', 'Responsavel',
+'Hora Inicio OP', 'Hora Fim OP', 'Disponibilidade (horas)',
 ];
 
 // Campos calculados por fórmula na própria planilha — nunca aparecem nos
@@ -415,37 +471,68 @@ const COMPUTED_FIELDS = {
 // (com motivo) ao longo do turno e ver o total aqui automaticamente.
 'Tempo de Parada (min)': '=IFERROR(SUMIF(\'PARADAS MAQ\'!$D:$D;ROW();\'PARADAS MAQ\'!$E:$E);0)',
 // META agora vem da aba "Metas" (Linha/Maquina -> Meta), por VLOOKUP na
-// Linha/Maquina desta mesma linha (coluna C) — não é mais digitado à mão,
-// nem no Novo Registro nem na edição. Para mudar a meta de uma máquina,
-// edite a aba Metas uma vez; todas as linhas dessa máquina recalculam sozinhas.
-'META': '=IFERROR(VLOOKUP(INDIRECT("C"&ROW());Metas!A:B;2;0);"")',
+// Linha/Maquina desta mesma linha — não é mais digitado à mão, nem no Novo
+// Registro nem na edição. Para mudar a meta de uma máquina, edite a aba
+// Metas uma vez; todas as linhas dessa máquina recalculam sozinhas.
+// Usa columnLetter('Linha/Maquina') em vez de "C" fixo (era hardcoded antes
+// — corrigido agora que outras colunas foram adicionadas, pra não quebrar
+// se a posição de Linha/Maquina mudar de novo no futuro).
+'META': `=IFERROR(VLOOKUP(INDIRECT("${columnLetter('Linha/Maquina')}"&ROW());Metas!A:B;2;0);"")`,
 // Referencia Producao no Turno e META pela posição ATUAL em FIELDS_ALL, não
 // por letra fixa — depois de remover colunas as posições deslocam e
 // INDIRECT("H"...) não se ajusta sozinho (é uma referência por string,
 // diferente de =F2/G2 que o Sheets ajusta automaticamente ao apagar coluna).
 'Eff %': `=IFERROR(INDIRECT("${columnLetter('Producao no Turno (Un)')}"&ROW())/INDIRECT("${columnLetter('META')}"&ROW());"")`,
+// Disponibilidade (horas) = Hora Fim OP - Hora Inicio OP, em horas. Só faz
+// sentido quando o operador preencheu os dois campos nesta linha; quando
+// alguma das duas estiver vazia, a fórmula ainda calcula (célula vazia vira
+// 0 no Sheets), então o dashboard trata isso na exibição (mostra "—" em vez
+// de "0h" quando falta um dos dois horários) — ver COLUMNS_DETALHE.
+'Disponibilidade (horas)': `=IFERROR((INDIRECT("${columnLetter('Hora Fim OP')}"&ROW())-INDIRECT("${columnLetter('Hora Inicio OP')}"&ROW()))*24;"")`,
 };
 
 // Campos exibidos nos formulários de novo registro / edição (todos exceto os calculados).
 const FORM_FIELDS = FIELDS_ALL.filter(f => !(f in COMPUTED_FIELDS));
-// Índice de corte: tudo antes de 'Observacoes' é considerado "dados
-// iniciais do registro" — o bloco de Paradas da Máquina é inserido logo
-// depois desse grupo e antes de Observações (pedido do usuário).
-const OBS_INDEX = FORM_FIELDS.indexOf('Observacoes');
-const FORM_FIELDS_BEFORE_OBS = FORM_FIELDS.slice(0, OBS_INDEX);
-const FORM_FIELDS_FROM_OBS = FORM_FIELDS.slice(OBS_INDEX);
+// Ordem de EXIBIÇÃO do formulário (Novo Registro/Editar) — independente da
+// posição física das colunas na planilha. 'Hora Inicio OP'/'Hora Fim OP'
+// ficam fisicamente no fim da planilha (O/P, pra não deslocar as colunas já
+// existentes), mas visualmente fazem mais sentido logo depois de "Ordem de
+// produção" (o operador informa o número da OP e, junto, quando ela
+// começou/terminou nesse registro). O bloco de Paradas da Máquina entra
+// depois desse grupo e antes de Observações; o resto (Observações em
+// diante) vem por último, na ordem de FIELDS_ALL.
+const FORM_FIELDS_BEFORE_OBS = [
+'Data', 'Ordem de produção', 'Hora Inicio OP', 'Hora Fim OP',
+'Linha/Maquina', 'Operador', 'Producao no Turno (Un)',
+];
+const FORM_FIELDS_FROM_OBS = FORM_FIELDS.filter(f => !FORM_FIELDS_BEFORE_OBS.includes(f));
 
-const FIELD_TYPES = { 'Data': 'date', 'Producao no Turno (Un)': 'number' };
+const FIELD_TYPES = {
+'Data': 'date',
+'Producao no Turno (Un)': 'number',
+'Hora Inicio OP': 'time',
+'Hora Fim OP': 'time',
+};
 const FIELD_TEXTAREA = ['Descricao da Ocorrencia', 'Causa Raiz', 'Acao Corretiva', 'Observacoes'];
 
-// Colunas exibidas na tabela principal — ordem de EXIBIÇÃO escolhida pelo
-// usuário (diferente da ordem real das colunas na planilha). A letra da
-// coluna mostrada no cabeçalho (via columnLetter) continua batendo com a
-// posição real em FIELDS_ALL, não com a ordem desta lista. 'Hora Inicio' e
-// 'Hora Fim' foram removidas daqui (e da planilha) — não eram usadas em
-// lugar nenhum além de exibição, e o horário de cada parada já é lançado
-// individualmente na aba PARADAS MAQ.
-const COLUMNS = [
+// Mostra "—" em vez de "0" quando falta Hora Início OP ou Hora Fim OP (a
+// fórmula de Disponibilidade calcula 0 nesse caso, já que INDIRECT de uma
+// célula vazia retorna 0 no Sheets — não é um erro, então IFERROR não pega).
+function fmtDisponibilidade(r){
+if (!r['Hora Inicio OP'] || !r['Hora Fim OP']) return '—';
+const h = num(r['Disponibilidade (horas)']);
+return h == null ? '—' : `${fmtNum(h, 2)} h`;
+}
+
+// Dashboard 1 — "Detalhe Diário de Bordo": vai de Data até Observações (o
+// núcleo operacional do registro: quem, onde, quanto produziu, meta, Eff%,
+// parada, e agora também o início/fim da OP e a Disponibilidade calculada),
+// MAIS o Eff % (mantido aqui de propósito — é o que aciona o destaque
+// verde/amarelo/vermelho da linha, que já era um pedido anterior do
+// usuário). As colunas de RCA/TPM (Descrição, Causa Raiz, Ação Corretiva,
+// Status, Responsável) saíram daqui e foram para o dashboard TPM
+// (COLUMNS_TPM), que é o dashboard 2, separado.
+const COLUMNS_DETALHE = [
 { key: 'Data', label: 'Data' },
 { key: 'Ordem de produção', label: 'Ordem de Produção' },
 { key: 'Linha/Maquina', label: 'Linha/Máquina' },
@@ -454,7 +541,17 @@ const COLUMNS = [
 { key: 'META', label: 'Meta' },
 { key: 'Eff %', label: 'Eff %' },
 { key: 'Tempo de Parada (min)', label: 'Parada (min)' },
+{ key: 'Hora Inicio OP', label: 'Início OP' },
+{ key: 'Hora Fim OP', label: 'Fim OP' },
+{ key: 'Disponibilidade (horas)', label: 'Disponibilidade (h)', render: fmtDisponibilidade },
 { key: 'Observacoes', label: 'Observações', wrap: true },
+];
+
+// Dashboard 2 — "TPM": foco em causa raiz / ação corretiva das ocorrências,
+// sem as colunas de produção (que já estão no dashboard Detalhe).
+const COLUMNS_TPM = [
+{ key: 'Data', label: 'Data' },
+{ key: 'Linha/Maquina', label: 'Linha/Máquina' },
 { key: 'Descricao da Ocorrencia', label: 'Descrição', wrap: true },
 { key: 'Causa Raiz', label: 'Causa Raiz', wrap: true },
 { key: 'Acao Corretiva', label: 'Ação Corretiva', wrap: true },
@@ -690,6 +787,7 @@ if (values.includes(current)) el.value = current;
 };
 sel('fLinha', [...new Set(ALL_ROWS.map(r => r['Linha/Maquina']).filter(Boolean))].sort());
 sel('fOperador', [...new Set(ALL_ROWS.map(r => r['Operador']).filter(Boolean))].sort());
+sel('fOrdemProducao', [...new Set(ALL_ROWS.map(r => r['Ordem de produção']).filter(Boolean))].sort());
 sel('fHistLinha', [...new Set(ALL_ROWS.map(r => r['Linha/Maquina']).filter(Boolean))].sort());
 sel('fHistOrdem', [...new Set(ALL_ROWS.map(r => r['Ordem de produção']).filter(Boolean))].sort());
 }
@@ -729,9 +827,11 @@ return true;
 function applyFilters(rows){
 const linha = document.getElementById('fLinha').value;
 const operador = document.getElementById('fOperador').value;
+const ordemProducao = document.getElementById('fOrdemProducao').value;
 const base = rows.filter(r =>
 (!linha || r['Linha/Maquina'] === linha) &&
-(!operador || r['Operador'] === operador)
+(!operador || r['Operador'] === operador) &&
+(!ordemProducao || r['Ordem de produção'] === ordemProducao)
 );
 return applyPeriodFilter(base);
 }
@@ -742,6 +842,8 @@ renderKPIs(filtered);
 renderTable(filtered);
 renderParadasHistorico();
 renderProducaoMetaChart();
+renderTpmTable();
+renderParetoChart();
 }
 
 // =====================================================================
@@ -812,25 +914,32 @@ const producoes = agg.map(a => a.producao);
 const cores = agg.map(a => effColor(a.eff));
 
 if (chartProducaoMeta) chartProducaoMeta.destroy();
+// Barra de Produção LARGA e colorida (verde/amarelo/vermelho) é a
+// protagonista visual; a barra de Meta fica FINA, desenhada por cima como
+// um marcador/traço de referência — antes era o contrário (Meta larga
+// "atrás", Produção fina "na frente"), mas isso deixava a cor de
+// performance pouco visível. Invertendo largura E ordem de desenho (Meta
+// precisa ser desenhada DEPOIS/order maior pra aparecer como marcador em
+// cima da barra larga de Produção, não escondida atrás dela).
 chartProducaoMeta = new Chart(canvas.getContext('2d'), {
 type: 'bar',
 data: {
 labels,
 datasets: [
 {
-label: 'Meta',
-data: metas,
-backgroundColor: 'rgba(143,154,192,0.28)',
+label: 'Produção',
+data: producoes,
+backgroundColor: cores,
 barThickness: 26,
 borderRadius: 4,
 order: 1,
 },
 {
-label: 'Produção',
-data: producoes,
-backgroundColor: cores,
-barThickness: 13,
-borderRadius: 4,
+label: 'Meta',
+data: metas,
+backgroundColor: 'rgba(232,236,245,0.55)',
+barThickness: 8,
+borderRadius: 3,
 order: 2,
 },
 ],
@@ -866,13 +975,138 @@ return eff != null ? [`Eff: ${fmtNum(eff, 2)}%`] : ['Eff: — (meta não definid
 });
 }
 
+// =====================================================================
+// Gráfico "Pareto de Paradas" — barras (duração por código de parada) +
+// linha de % acumulado, ordenado do maior pro menor motivo de parada.
+// =====================================================================
+let chartPareto = null;
+
+// Junta cada lançamento de PARADAS MAQ com o registro pai (via
+// LINHA_DIARIO -> _row) só pra pegar a Data dele — PARADAS MAQ não tem
+// coluna de Data própria — e então aplica o filtro de período dia/semana/
+// mês igual aos outros painéis, agrupando o total de minutos por Código
+// Parada e calculando o % acumulado (Pareto).
+function aggregateParadasPareto(periodo, anchorStr){
+const joined = RAW_PARADAS_ROWS
+.filter(p => p['HORA INICIO'])
+.map(p => {
+const parentRow = Number(p['LINHA_DIARIO']);
+const parent = RAW_MAIN_ROWS.find(r => r._row === parentRow) || {};
+return {
+Data: parent['Data'],
+codigo: p['CODIGO PARADA'] || 'Não informado',
+duracao: num(p['DURACAO (MIN)']) || 0,
+};
+})
+.filter(x => x.Data);
+
+const filtered = filterRowsByPeriod(joined, periodo, anchorStr);
+
+const map = new Map();
+filtered.forEach(x => map.set(x.codigo, (map.get(x.codigo) || 0) + x.duracao));
+
+const arr = Array.from(map.entries())
+.map(([codigo, duracao]) => ({ codigo, duracao }))
+.sort((a, b) => b.duracao - a.duracao);
+
+const total = arr.reduce((s, a) => s + a.duracao, 0);
+let acumulado = 0;
+return arr.map(a => {
+acumulado += a.duracao;
+return { ...a, pctAcumulado: total > 0 ? (acumulado / total) * 100 : 0 };
+});
+}
+
+function renderParetoChart(){
+const canvas = document.getElementById('chartPareto');
+const emptyMsg = document.getElementById('paretoEmptyMsg');
+if (!canvas) return;
+if (typeof Chart === 'undefined'){
+setTimeout(renderParetoChart, 300);
+return;
+}
+const periodo = document.getElementById('fParetoPeriodo').value;
+const anchorStr = document.getElementById('fParetoData').value;
+const arr = aggregateParadasPareto(periodo, anchorStr);
+
+if (!arr.length){
+emptyMsg.style.display = 'flex';
+if (chartPareto){ chartPareto.destroy(); chartPareto = null; }
+return;
+}
+emptyMsg.style.display = 'none';
+
+if (chartPareto) chartPareto.destroy();
+chartPareto = new Chart(canvas.getContext('2d'), {
+data: {
+labels: arr.map(a => a.codigo),
+datasets: [
+{
+type: 'bar',
+label: 'Duração (min)',
+data: arr.map(a => a.duracao),
+backgroundColor: '#4f8cff',
+borderRadius: 4,
+yAxisID: 'y',
+order: 2,
+},
+{
+type: 'line',
+label: '% Acumulado',
+data: arr.map(a => a.pctAcumulado),
+borderColor: '#f5b942',
+backgroundColor: '#f5b942',
+pointRadius: 3,
+pointBackgroundColor: '#f5b942',
+tension: 0.15,
+yAxisID: 'y1',
+order: 1,
+},
+],
+},
+options: {
+responsive: true,
+maintainAspectRatio: false,
+scales: {
+x: {
+ticks: { color: '#e8ecf5', autoSkip: false, maxRotation: 60, minRotation: 0 },
+grid: { display: false },
+},
+y: {
+beginAtZero: true,
+position: 'left',
+title: { display: true, text: 'Duração (min)', color: '#8f9ac0' },
+ticks: { color: '#8f9ac0' },
+grid: { color: 'rgba(143,154,192,0.15)' },
+},
+y1: {
+beginAtZero: true,
+max: 100,
+position: 'right',
+title: { display: true, text: '% Acumulado', color: '#8f9ac0' },
+ticks: { color: '#8f9ac0', callback: v => v + '%' },
+grid: { display: false },
+},
+},
+plugins: {
+legend: { labels: { color: '#e8ecf5' } },
+},
+},
+});
+}
+
 // Alterna o painel do gráfico pra um overlay que cobre a tela inteira (mais
 // confiável que depender só da Fullscreen API, que alguns navegadores/
 // contextos bloqueiam) e também tenta a Fullscreen API de verdade por cima,
 // quando disponível — dá o efeito de "abrir em tela cheia" nos dois casos.
-function toggleChartFullscreen(){
-const panel = document.getElementById('panelChartProducaoMeta');
-const btn = document.getElementById('btnChartFullscreen');
+// Genérico: qualquer painel de gráfico (Produção x Meta, Pareto de
+// Paradas, ...) pode usar esta mesma função de tela cheia, passando o id do
+// painel, o id do botão, e uma função que devolve a instância Chart.js
+// daquele painel (pra redimensionar o canvas depois de entrar/sair da tela
+// cheia). Antes isso era hardcoded só pro painel Produção x Meta.
+function toggleChartFullscreen(panelId, btnId, getChart){
+const panel = document.getElementById(panelId);
+const btn = document.getElementById(btnId);
 const isFull = panel.classList.toggle('chart-panel-fullscreen');
 btn.textContent = isFull ? '⤢ Sair da tela cheia' : '⛶ Tela cheia';
 if (isFull && panel.requestFullscreen){
@@ -880,16 +1114,19 @@ panel.requestFullscreen().catch(() => {});
 } else if (!isFull && document.fullscreenElement){
 document.exitFullscreen().catch(() => {});
 }
-setTimeout(() => { if (chartProducaoMeta) chartProducaoMeta.resize(); }, 50);
+setTimeout(() => { const c = getChart(); if (c) c.resize(); }, 50);
 }
 document.addEventListener('fullscreenchange', () => {
-const panel = document.getElementById('panelChartProducaoMeta');
-if (!panel) return;
-if (!document.fullscreenElement && panel.classList.contains('chart-panel-fullscreen')){
+if (document.fullscreenElement) return;
+document.querySelectorAll('.chart-panel-fullscreen').forEach(panel => {
 panel.classList.remove('chart-panel-fullscreen');
-document.getElementById('btnChartFullscreen').textContent = '⛶ Tela cheia';
-if (chartProducaoMeta) setTimeout(() => chartProducaoMeta.resize(), 50);
-}
+const btn = panel.querySelector('.chart-panel-controls button[id^="btn"]');
+if (btn) btn.textContent = '⛶ Tela cheia';
+});
+setTimeout(() => {
+if (chartProducaoMeta) chartProducaoMeta.resize();
+if (chartPareto) chartPareto.resize();
+}, 50);
 });
 
 function renderKPIs(rows){
@@ -909,31 +1146,53 @@ lastRows = rows;
 const editing = !!accessToken;
 document.getElementById('newRecordBtn').style.display = editing ? '' : 'none';
 document.getElementById('manageAccessBtn').style.display = editing ? '' : 'none';
+renderColumnsTable(rows, COLUMNS_DETALHE, 'tblDetalheHeadRow', 'tblDetalhe', editing);
+}
 
-const headRow = document.getElementById('tblMainHeadRow');
-headRow.innerHTML = COLUMNS.map(c =>
+// Renderiza uma tabela genérica a partir de um array de COLUMNS — usado
+// tanto pelo dashboard "Detalhe Diário de Bordo" quanto pelo dashboard
+// "TPM" (dois dashboards separados, mesma função de render). Os botões de
+// ação (Ver Paradas / Editar) abrem os MESMOS modais em qualquer um dos
+// dois, já que ambos operam sobre a linha inteira (_row), não só sobre as
+// colunas visíveis naquela tabela.
+function renderColumnsTable(rows, columns, headRowId, tableId, editing, colorByEff = true){
+const headRow = document.getElementById(headRowId);
+headRow.innerHTML = columns.map(c =>
 `<th>${c.label}<br><span class="col-tag-th">(Coluna ${columnLetter(c.key)})</span></th>`
 ).join('') + '<th></th>';
 
-const tbody = document.querySelector('#tblMain tbody');
+const tbody = document.querySelector('#' + tableId + ' tbody');
 if (!rows.length){
-tbody.innerHTML = `<tr><td colspan="${COLUMNS.length + 1}" class="empty">Nenhum dado encontrado.</td></tr>`;
+tbody.innerHTML = `<tr><td colspan="${columns.length + 1}" class="empty">Nenhum dado encontrado.</td></tr>`;
 return;
 }
 tbody.innerHTML = rows.map(r => {
-const cells = COLUMNS.map(c => {
-const v = r[c.key];
+const cells = columns.map(c => {
 const cls = c.wrap ? ' class="wrap"' : '';
-const content = c.badge ? badge(v, statusBadgeClass(v)) : (v || '—');
+const content = c.render ? c.render(r) : (c.badge ? badge(r[c.key], statusBadgeClass(r[c.key])) : (r[c.key] || '—'));
 return `<td${cls}>${content}</td>`;
 }).join('');
 const actions = `<td>
 <button class="btn icon-btn" title="Ver Paradas" onclick="openParadasViewModal(${r._row})">🕒</button>
 ${editing ? `<button class="btn icon-btn" title="Editar" onclick="openEditModal(${r._row})">✏️</button>` : ''}
 </td>`;
-const rowCls = effRowClass(r['Eff %']);
+// O destaque verde/amarelo/vermelho por Eff % só faz sentido no dashboard
+// Detalhe (é o indicador de atingimento de meta) — no TPM, que não mostra
+// Eff%, colorir a linha da mesma forma ficaria sem contexto/confuso.
+const rowCls = colorByEff ? effRowClass(r['Eff %']) : '';
 return `<tr${rowCls ? ` class="${rowCls}"` : ''}>${cells}${actions}</tr>`;
 }).join('');
+}
+
+// Dashboard TPM tem seu PRÓPRIO filtro de período (dia/semana/mês),
+// independente dos filtros globais do dashboard Detalhe — conforme pedido
+// ("manter filtros com data: dia, semana, mês").
+function renderTpmTable(){
+const editing = !!accessToken;
+const periodo = document.getElementById('fTpmPeriodo').value;
+const anchorStr = document.getElementById('fTpmData').value;
+const filtered = filterRowsByPeriod(ALL_ROWS, periodo, anchorStr);
+renderColumnsTable(filtered, COLUMNS_TPM, 'tblTpmHeadRow', 'tblTpm', editing, false);
 }
 
 // =====================================================================
