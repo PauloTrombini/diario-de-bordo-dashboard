@@ -842,13 +842,34 @@ ${existingHtml || ''}
 </div>`;
 }
 
+// addParadaRow/removeParadaRow SÓ inserem/removem o <div> da linha específica
+// no DOM — nunca reconstroem list.innerHTML inteiro. Antes, "+ Adicionar
+// parada" chamava renderParadasRows(mode), que recriava TODAS as linhas do
+// zero (inclusive as já preenchidas), apagando o que o operador já tinha
+// digitado. renderParadasRows continua existindo só para o render INICIAL
+// (modal recém-aberto, sem nada digitado ainda), onde não há risco de perda.
 function addParadaRow(mode){
-paradaRowIds[mode].push(++paradaRowSeq);
-renderParadasRows(mode);
+const id = ++paradaRowSeq;
+paradaRowIds[mode].push(id);
+const list = document.getElementById('paradasList_' + mode);
+if (!list) return;
+if (paradaRowIds[mode].length === 1){
+list.innerHTML = paradaRowHtml(mode, id);
+} else {
+list.insertAdjacentHTML('beforeend', paradaRowHtml(mode, id));
+}
+// Foca o campo Início da linha recém-criada, pra agilizar a digitação em sequência.
+const novaLinha = document.getElementById(`paradaRow_${mode}_${id}`);
+if (novaLinha) novaLinha.querySelector('.pr-inicio').focus();
 }
 function removeParadaRow(mode, id){
 paradaRowIds[mode] = paradaRowIds[mode].filter(x => x !== id);
-renderParadasRows(mode);
+const row = document.getElementById(`paradaRow_${mode}_${id}`);
+if (row) row.remove();
+if (!paradaRowIds[mode].length){
+const list = document.getElementById('paradasList_' + mode);
+if (list) list.innerHTML = '<div class="hint">Nenhuma parada adicionada ainda nesta edição.</div>';
+}
 }
 function renderParadasRows(mode){
 const list = document.getElementById('paradasList_' + mode);
@@ -857,14 +878,56 @@ list.innerHTML = paradaRowIds[mode].length
 ? paradaRowIds[mode].map(id => paradaRowHtml(mode, id)).join('')
 : '<div class="hint">Nenhuma parada adicionada ainda nesta edição.</div>';
 }
+// Colunas de cada linha de parada, na ordem visual (usado pela navegação por
+// teclado abaixo) — Início, Fim, Código Parada.
+const PARADA_ROW_COLS = ['.pr-inicio', '.pr-fim', '.pr-codigo'];
 function paradaRowHtml(mode, id){
 const opts = CODIGO_PARADA_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
+const nav = `onkeydown="handleParadaKeyNav(event, '${mode}')"`;
 return `<div class="parada-row" id="paradaRow_${mode}_${id}">
-<div><label>Início</label><input type="time" class="pr-inicio"></div>
-<div><label>Fim</label><input type="time" class="pr-fim"></div>
-<div><label>Código Parada</label><select class="pr-codigo"><option value="">Selecione…</option>${opts}</select></div>
-<button type="button" class="btn icon-btn" title="Remover" onclick="removeParadaRow('${mode}', ${id})">✕</button>
+<div><label>Início</label><input type="time" class="pr-inicio" ${nav}></div>
+<div><label>Fim</label><input type="time" class="pr-fim" ${nav}></div>
+<div><label>Código Parada</label><select class="pr-codigo" ${nav}><option value="">Selecione…</option>${opts}</select></div>
+<button type="button" class="btn icon-btn" title="Remover" tabindex="-1" onclick="removeParadaRow('${mode}', ${id})">✕</button>
 </div>`;
+}
+// Navegação por teclado estilo planilha entre os campos de uma parada:
+// Tab já funciona nativamente (segue a ordem do DOM: Início > Fim > Código
+// Parada > próxima linha — o botão "✕" tem tabindex="-1" pra não interromper
+// essa sequência). Aqui tratamos as setas: direita/esquerda andam entre os
+// campos da MESMA linha (e viram pra linha seguinte/anterior nas pontas);
+// cima/baixo pulam pro mesmo campo na linha de cima/baixo — como mover entre
+// células de uma planilha.
+function handleParadaKeyNav(e, mode){
+const key = e.key;
+if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key)) return;
+const list = document.getElementById('paradasList_' + mode);
+if (!list) return;
+const rows = Array.from(list.querySelectorAll('.parada-row'));
+const currentRow = e.target.closest('.parada-row');
+const rowIdx = rows.indexOf(currentRow);
+const colIdx = PARADA_ROW_COLS.findIndex(sel => e.target.matches(sel));
+if (rowIdx === -1 || colIdx === -1) return;
+
+let targetRow = rowIdx, targetCol = colIdx;
+if (key === 'ArrowRight'){
+targetCol++;
+if (targetCol > PARADA_ROW_COLS.length - 1){ targetCol = 0; targetRow++; }
+} else if (key === 'ArrowLeft'){
+targetCol--;
+if (targetCol < 0){ targetCol = PARADA_ROW_COLS.length - 1; targetRow--; }
+} else if (key === 'ArrowDown'){
+targetRow++;
+} else if (key === 'ArrowUp'){
+targetRow--;
+}
+if (targetRow < 0 || targetRow >= rows.length) return; // já está na primeira/última linha
+const targetField = rows[targetRow].querySelector(PARADA_ROW_COLS[targetCol]);
+if (targetField){
+e.preventDefault();
+targetField.focus();
+if (typeof targetField.select === 'function') targetField.select();
+}
 }
 // Lê os valores atuais direto do DOM (não mantemos estado espelhado em JS
 // para evitar dessincronia entre o array de ids e os inputs digitados).
