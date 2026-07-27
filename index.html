@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Diário de Bordo — Máquinas</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
 :root{
 --bg:#0b0e17; --panel:#111726; --panel2:#171f33; --border:#232b42;
@@ -91,6 +92,24 @@ tr.eff-bad:hover td{ background:rgba(245,97,92,.2); }
 .panel-light .btn{ background:#fff; border-color:#d8dee8; color:#2a3242; }
 .panel-light .btn:hover{ border-color:var(--accent); }
 .panel-light .col-tag-th{ opacity:.9; }
+
+/* Painel "Produção x Meta por Máquina" (gráfico de barras horizontal) e seu
+   botão de tela cheia. Em vez de depender só da Fullscreen API do navegador
+   (que pode ser bloqueada em alguns contextos), o botão alterna uma classe
+   que transforma o painel num overlay fixo cobrindo a tela inteira — mais
+   confiável — e tenta a Fullscreen API real por cima, quando disponível. */
+.chart-panel-head{
+display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px;
+}
+.chart-panel-head h2{ margin:0; }
+.chart-panel-controls{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.chart-canvas-wrap{ position:relative; height:380px; }
+.chart-canvas-wrap .empty{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+#panelChartProducaoMeta.chart-panel-fullscreen{
+position:fixed; inset:0; z-index:200; margin:0; border-radius:0;
+overflow:auto; padding:24px 28px; background:var(--bg);
+}
+#panelChartProducaoMeta.chart-panel-fullscreen .chart-canvas-wrap{ height:calc(100vh - 140px); }
 
 .badge{ display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; }
 .badge.ok{ background:rgba(47,208,138,.15); color:var(--green); }
@@ -244,6 +263,25 @@ main{ padding:14px 12px 40px; }
 </thead>
 <tbody></tbody>
 </table>
+</div>
+</div>
+
+<div class="panel" id="panelChartProducaoMeta">
+<div class="chart-panel-head">
+<h2>Produção x Meta por Máquina</h2>
+<div class="chart-panel-controls">
+<select id="fChartPeriodo" onchange="renderProducaoMetaChart()">
+<option value="dia">Dia</option>
+<option value="semana">Semana</option>
+<option value="mes" selected>Mês</option>
+</select>
+<input type="date" id="fChartData" onchange="renderProducaoMetaChart()">
+<button class="btn" id="btnChartFullscreen" onclick="toggleChartFullscreen()">⛶ Tela cheia</button>
+</div>
+</div>
+<div class="chart-canvas-wrap">
+<canvas id="chartProducaoMeta"></canvas>
+<div id="chartEmptyMsg" class="empty hint" style="display:none;">Nenhum dado para o período selecionado.</div>
 </div>
 </div>
 </main>
@@ -660,8 +698,16 @@ sel('fHistOrdem', [...new Set(ALL_ROWS.map(r => r['Ordem de produção']).filter
 // se nenhuma data for escolhida, usa hoje como âncora.
 function applyPeriodFilter(rows){
 const periodo = document.getElementById('fPeriodo').value;
-if (periodo === 'todos') return rows;
 const anchorStr = document.getElementById('fData').value; // YYYY-MM-DD ou ''
+return filterRowsByPeriod(rows, periodo, anchorStr);
+}
+
+// Lógica de período compartilhada entre o filtro principal (Filtros ->
+// Período) e o filtro próprio do gráfico "Produção x Meta por Máquina" —
+// ambos precisam do mesmo recorte dia/semana/mês, só que ancorado em campos
+// de data diferentes na tela.
+function filterRowsByPeriod(rows, periodo, anchorStr){
+if (periodo === 'todos') return rows;
 const anchor = anchorStr ? new Date(anchorStr + 'T00:00:00') : new Date();
 return rows.filter(r => {
 const d = parseBRDate(r['Data']);
@@ -695,7 +741,156 @@ const filtered = applyFilters(ALL_ROWS);
 renderKPIs(filtered);
 renderTable(filtered);
 renderParadasHistorico();
+renderProducaoMetaChart();
 }
+
+// =====================================================================
+// Gráfico "Produção x Meta por Máquina" — barras horizontais
+// =====================================================================
+// Estilo "bullet chart": a barra clara/larga (Meta) fica atrás como uma
+// "trilha", e a barra colorida/mais fina (Produção real) fica sobreposta —
+// assim a meta fica visualmente destacada mesmo sem precisar de um plugin
+// extra do Chart.js pra desenhar marcador. A cor da barra de Produção segue
+// as mesmas faixas de Eff % usadas na tabela Detalhe (>=75% verde, 60-74,9%
+// amarelo, <60% vermelho).
+let chartProducaoMeta = null;
+
+function effColor(pct){
+if (pct == null) return '#8f9ac0';
+if (pct >= 75) return '#2fd08a';
+if (pct >= 60) return '#f5b942';
+return '#f5615c';
+}
+
+// Soma Produção e Meta de TODOS os registros filtrados, agrupando por
+// Linha/Máquina — ou seja, o total de cada máquina no período (dia/semana/
+// mês) selecionado no filtro do próprio gráfico, conforme pedido.
+function aggregateProducaoPorMaquina(rows){
+const map = new Map();
+rows.forEach(r => {
+const maquina = r['Linha/Maquina'] || 'Não informado';
+const producao = num(r['Producao no Turno (Un)']) || 0;
+const meta = num(r['META']) || 0;
+const cur = map.get(maquina) || { producao: 0, meta: 0 };
+cur.producao += producao;
+cur.meta += meta;
+map.set(maquina, cur);
+});
+return Array.from(map.entries())
+.map(([maquina, v]) => ({
+maquina,
+producao: v.producao,
+meta: v.meta,
+eff: v.meta > 0 ? (v.producao / v.meta) * 100 : null,
+}))
+.sort((a, b) => b.producao - a.producao);
+}
+
+function renderProducaoMetaChart(){
+const canvas = document.getElementById('chartProducaoMeta');
+const emptyMsg = document.getElementById('chartEmptyMsg');
+if (!canvas) return;
+if (typeof Chart === 'undefined'){
+setTimeout(renderProducaoMetaChart, 300); // Chart.js ainda carregando
+return;
+}
+const periodo = document.getElementById('fChartPeriodo').value;
+const anchorStr = document.getElementById('fChartData').value;
+const filtered = filterRowsByPeriod(ALL_ROWS, periodo, anchorStr);
+const agg = aggregateProducaoPorMaquina(filtered);
+
+if (!agg.length){
+emptyMsg.style.display = 'flex';
+if (chartProducaoMeta){ chartProducaoMeta.destroy(); chartProducaoMeta = null; }
+return;
+}
+emptyMsg.style.display = 'none';
+
+const labels = agg.map(a => a.maquina);
+const metas = agg.map(a => a.meta);
+const producoes = agg.map(a => a.producao);
+const cores = agg.map(a => effColor(a.eff));
+
+if (chartProducaoMeta) chartProducaoMeta.destroy();
+chartProducaoMeta = new Chart(canvas.getContext('2d'), {
+type: 'bar',
+data: {
+labels,
+datasets: [
+{
+label: 'Meta',
+data: metas,
+backgroundColor: 'rgba(143,154,192,0.28)',
+barThickness: 26,
+borderRadius: 4,
+order: 1,
+},
+{
+label: 'Produção',
+data: producoes,
+backgroundColor: cores,
+barThickness: 13,
+borderRadius: 4,
+order: 2,
+},
+],
+},
+options: {
+indexAxis: 'y',
+responsive: true,
+maintainAspectRatio: false,
+scales: {
+x: {
+beginAtZero: true,
+grid: { color: 'rgba(143,154,192,0.15)' },
+ticks: { color: '#8f9ac0' },
+},
+y: {
+grid: { display: false },
+ticks: { color: '#e8ecf5' },
+},
+},
+plugins: {
+legend: { labels: { color: '#e8ecf5' } },
+tooltip: {
+callbacks: {
+label: (ctx) => `${ctx.dataset.label}: ${fmtNum(ctx.parsed.x)}`,
+afterBody: (items) => {
+const eff = agg[items[0].dataIndex].eff;
+return eff != null ? [`Eff: ${fmtNum(eff, 2)}%`] : ['Eff: — (meta não definida)'];
+},
+},
+},
+},
+},
+});
+}
+
+// Alterna o painel do gráfico pra um overlay que cobre a tela inteira (mais
+// confiável que depender só da Fullscreen API, que alguns navegadores/
+// contextos bloqueiam) e também tenta a Fullscreen API de verdade por cima,
+// quando disponível — dá o efeito de "abrir em tela cheia" nos dois casos.
+function toggleChartFullscreen(){
+const panel = document.getElementById('panelChartProducaoMeta');
+const btn = document.getElementById('btnChartFullscreen');
+const isFull = panel.classList.toggle('chart-panel-fullscreen');
+btn.textContent = isFull ? '⤢ Sair da tela cheia' : '⛶ Tela cheia';
+if (isFull && panel.requestFullscreen){
+panel.requestFullscreen().catch(() => {});
+} else if (!isFull && document.fullscreenElement){
+document.exitFullscreen().catch(() => {});
+}
+setTimeout(() => { if (chartProducaoMeta) chartProducaoMeta.resize(); }, 50);
+}
+document.addEventListener('fullscreenchange', () => {
+const panel = document.getElementById('panelChartProducaoMeta');
+if (!panel) return;
+if (!document.fullscreenElement && panel.classList.contains('chart-panel-fullscreen')){
+panel.classList.remove('chart-panel-fullscreen');
+document.getElementById('btnChartFullscreen').textContent = '⛶ Tela cheia';
+if (chartProducaoMeta) setTimeout(() => chartProducaoMeta.resize(), 50);
+}
+});
 
 function renderKPIs(rows){
 const totalParada = rows.reduce((s, r) => s + (num(r['Tempo de Parada (min)']) || 0), 0);
