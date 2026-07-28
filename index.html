@@ -161,7 +161,7 @@ letter-spacing:.03em; margin-bottom:10px;
 }
 .paradas-list{ display:flex; flex-direction:column; gap:10px; margin-bottom:10px; }
 .parada-row{
-display:grid; grid-template-columns:1fr 1fr 2fr auto; gap:10px; align-items:end;
+display:grid; grid-template-columns:1fr 1fr 1.6fr 1.6fr auto; gap:10px; align-items:end;
 background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px;
 }
 .parada-row label{ display:block; font-size:11px; color:var(--txt2); margin-bottom:4px; }
@@ -171,7 +171,7 @@ border-radius:6px; padding:7px 8px; font-size:13px; font-family:inherit;
 }
 .parada-row .icon-btn{ padding:8px 10px; }
 .parada-row-readonly{
-grid-template-columns:1fr 1fr 1fr; background:transparent; align-items:center; font-size:13px;
+grid-template-columns:1fr 1fr 1fr 1.6fr; background:transparent; align-items:center; font-size:13px;
 }
 .paradas-total{ font-size:13px; color:var(--txt2); margin:6px 0 14px; }
 .paradas-total strong{ color:var(--txt); }
@@ -261,6 +261,9 @@ main{ padding:14px 12px 40px; }
 <option value="mes" selected>Mês</option>
 </select>
 <input type="date" id="fTpmData" onchange="renderTpmTable()">
+<select id="fTpmStatus" onchange="renderTpmTable()"><option value="">Status: todos</option></select>
+<span class="filter-label">Data Conclusão</span>
+<input type="date" id="fTpmDataConclusao" onchange="renderTpmTable()">
 </div>
 </div>
 <div class="table-scroll">
@@ -321,6 +324,10 @@ main{ padding:14px 12px 40px; }
 <option value="mes" selected>Mês</option>
 </select>
 <input type="date" id="fParetoData" onchange="renderParetoChart()">
+<span class="filter-label">Mês a mês</span>
+<input type="month" id="fParetoMes" onchange="renderParetoChart()">
+<select id="fParetoCodigo" onchange="renderParetoChart()"><option value="">Código Parada: todos</option></select>
+<select id="fParetoLinha" onchange="renderParetoChart()"><option value="">Linha/Máquina: todas</option></select>
 <button class="btn" id="btnParetoFullscreen" onclick="toggleChartFullscreen('panelChartPareto','btnParetoFullscreen', () => chartPareto)">⛶ Tela cheia</button>
 </div>
 </div>
@@ -328,6 +335,7 @@ main{ padding:14px 12px 40px; }
 <canvas id="chartPareto"></canvas>
 <div id="paretoEmptyMsg" class="empty hint" style="display:none;">Nenhuma parada encontrada para o período selecionado.</div>
 </div>
+<div class="paradas-total" id="paretoTotalTempo"></div>
 </div>
 </main>
 
@@ -396,7 +404,11 @@ const GID_MAIN = '1700278622';
 // visualmente na grade) que cada cabeçalho é uma célula própria.
 const TAB_PARADAS = 'PARADAS MAQ';
 const GID_PARADAS = '122577231';
-const FIELDS_PARADAS = ['HORA INICIO', 'HORA FIM', 'CODIGO PARADA', 'LINHA_DIARIO', 'DURACAO (MIN)'];
+// 'Observacao' (coluna F) foi adicionada em 2026-07-28 para permitir digitar
+// uma observação livre em cada lançamento de parada (pedido do usuário) —
+// sempre no final, mesmo padrão de "novas colunas vão no final" já usado no
+// Diario de Bordo.
+const FIELDS_PARADAS = ['HORA INICIO', 'HORA FIM', 'CODIGO PARADA', 'LINHA_DIARIO', 'DURACAO (MIN)', 'Observacao'];
 const COMPUTED_FIELDS_PARADAS = {
 'DURACAO (MIN)': '=IFERROR((INDIRECT("B"&ROW())-INDIRECT("A"&ROW()))*1440;"")',
 };
@@ -408,6 +420,16 @@ const COMPUTED_FIELDS_PARADAS = {
 // outros campos de lista suspensa: guarda o texto legível, não só o id).
 const TAB_CODIGO_PARADA = 'CODIGO PARADA';
 const GID_CODIGO_PARADA = '1991757817';
+
+// Aba "Metas": A=Linha/Maquina, B=Produto, C=Unidade, D=Unidade/hora,
+// E=Horas programadas, F=Meta (criada/expandida pelo usuário em 2026-07-28
+// para o novo cálculo de Eff%). Aqui só usamos a relação Linha/Maquina ->
+// Produto (colunas A/B) pra popular o dropdown dependente de Produto no
+// Novo Registro/Edição. Os próprios cálculos de Meta/Tempo Ciclo/
+// Produtividade continuam sendo feitos por fórmula na planilha (ver
+// COMPUTED_FIELDS abaixo), não recalculados aqui.
+const TAB_METAS = 'Metas';
+const GID_METAS = '1280024266';
 
 // 'Tipo de Ocorrencia' foi REMOVIDO da aba principal pelo usuário direto no
 // Google Sheets (o motivo da parada agora é lançado por evento, via "Código
@@ -426,29 +448,35 @@ const DROPDOWN_FIELDS = [
 // para escrever linhas corretamente). Esta ordem foi ajustada manualmente
 // pelo usuário direto no Google Sheets — sempre confira o cabeçalho real da
 // planilha antes de mudar esta lista, não assuma que ela ainda bate com uma
-// versão anterior do dashboard. Mudanças mais recentes (2026-07-27):
-// 'Turno' virou 'Ordem de produção' (mesma posição, coluna B), e 'Hora
-// Inicio'/'Hora Fim' foram REMOVIDAS da planilha (o horário de cada parada
-// já é lançado individualmente na aba PARADAS MAQ, então o intervalo
-// início/fim do registro inteiro deixou de fazer sentido/ser usado).
-// 'Tempo de Parada (min)', 'META' e 'Eff %' são calculados por fórmula e
+// versão anterior do dashboard.
+// Mudanças de 2026-07-28 (confirmadas célula a célula na planilha real,
+// aba "Diario de Bordo", colunas A→U):
+// - 'Produto' (coluna D) foi adicionada logo depois de 'Linha/Maquina' —
+//   escolhido no Novo Registro via dropdown dependente da Linha/Maquina
+//   (dados vêm da aba Metas: Linha/Maquina -> Produto).
+// - 'Tempo ciclo/hora' (I) e 'Podutividade/hora' (J, nome com esse typo
+//   mesmo na planilha) foram adicionadas entre META e Eff % — fazem parte
+//   do novo método de cálculo de Eff % (antes era Producao/Meta, agora é
+//   Podutividade/hora ÷ Tempo ciclo/hora).
+// - 'Data de concluão' (R, typo mantido — é o nome real da coluna) foi
+//   adicionada depois de Responsavel — preenchida manualmente pelo
+//   usuário, não é fórmula.
+// - 'Disponibilidade (horas)' foi renomeada para 'Disponibilidade
+//   (minutos)' e a fórmula mudou de horas para minutos.
+// 'Tempo de Parada (min)', 'META', 'Tempo ciclo/hora', 'Podutividade/hora',
+// 'Eff %' e 'Disponibilidade (minutos)' são todos calculados por fórmula e
 // nunca são digitados pelo usuário — ver FORM_FIELDS abaixo.
-// 'Hora Inicio OP', 'Hora Fim OP' e 'Disponibilidade (horas)' foram
-// adicionadas em 2026-07-27 (colunas O, P, Q) — sempre no FINAL da lista,
-// de propósito: colocá-las no meio (ex.: logo depois de "Ordem de
-// produção") deslocaria as colunas de A a N e quebraria as fórmulas that
-// dependem de posição fixa. Elas registram quando a Ordem de Produção
-// começou/terminou NESTE turno/registro (preenchido pelo operador) e o
-// tempo total (Disponibilidade) é calculado por fórmula — ver
-// COMPUTED_FIELDS abaixo. A ORDEM DE EXIBIÇÃO delas no formulário (perto de
-// "Ordem de produção", não no fim) é controlada separadamente por
+// A ORDEM DE EXIBIÇÃO no formulário (Produto perto de Linha/Maquina, Hora
+// Inicio/Fim OP perto de Ordem de produção, etc., não necessariamente na
+// mesma ordem física da planilha) é controlada separadamente por
 // FORM_FIELDS_BEFORE_OBS, não por esta lista.
 const FIELDS_ALL = [
-'Data', 'Ordem de produção', 'Linha/Maquina', 'Operador',
+'Data', 'Ordem de produção', 'Linha/Maquina', 'Produto', 'Operador',
 'Tempo de Parada (min)', 'Producao no Turno (Un)',
-'META', 'Observacoes', 'Eff %', 'Descricao da Ocorrencia', 'Causa Raiz',
-'Acao Corretiva', 'Status', 'Responsavel',
-'Hora Inicio OP', 'Hora Fim OP', 'Disponibilidade (horas)',
+'META', 'Tempo ciclo/hora', 'Podutividade/hora', 'Eff %',
+'Observacoes', 'Descricao da Ocorrencia', 'Causa Raiz',
+'Acao Corretiva', 'Status', 'Responsavel', 'Data de concluão',
+'Hora Inicio OP', 'Hora Fim OP', 'Disponibilidade (minutos)',
 ];
 
 // Campos calculados por fórmula na própria planilha — nunca aparecem nos
@@ -470,25 +498,37 @@ const COMPUTED_FIELDS = {
 // Inicio/Hora Fim desta mesma linha. Isso permite registrar várias paradas
 // (com motivo) ao longo do turno e ver o total aqui automaticamente.
 'Tempo de Parada (min)': '=IFERROR(SUMIF(\'PARADAS MAQ\'!$D:$D;ROW();\'PARADAS MAQ\'!$E:$E);0)',
-// META agora vem da aba "Metas" (Linha/Maquina -> Meta), por VLOOKUP na
-// Linha/Maquina desta mesma linha — não é mais digitado à mão, nem no Novo
-// Registro nem na edição. Para mudar a meta de uma máquina, edite a aba
-// Metas uma vez; todas as linhas dessa máquina recalculam sozinhas.
-// Usa columnLetter('Linha/Maquina') em vez de "C" fixo (era hardcoded antes
-// — corrigido agora que outras colunas foram adicionadas, pra não quebrar
-// se a posição de Linha/Maquina mudar de novo no futuro).
-'META': `=IFERROR(VLOOKUP(INDIRECT("${columnLetter('Linha/Maquina')}"&ROW());Metas!A:B;2;0);"")`,
-// Referencia Producao no Turno e META pela posição ATUAL em FIELDS_ALL, não
-// por letra fixa — depois de remover colunas as posições deslocam e
-// INDIRECT("H"...) não se ajusta sozinho (é uma referência por string,
-// diferente de =F2/G2 que o Sheets ajusta automaticamente ao apagar coluna).
-'Eff %': `=IFERROR(INDIRECT("${columnLetter('Producao no Turno (Un)')}"&ROW())/INDIRECT("${columnLetter('META')}"&ROW());"")`,
-// Disponibilidade (horas) = Hora Fim OP - Hora Inicio OP, em horas. Só faz
-// sentido quando o operador preencheu os dois campos nesta linha; quando
-// alguma das duas estiver vazia, a fórmula ainda calcula (célula vazia vira
-// 0 no Sheets), então o dashboard trata isso na exibição (mostra "—" em vez
-// de "0h" quando falta um dos dois horários) — ver COLUMNS_DETALHE.
-'Disponibilidade (horas)': `=IFERROR((INDIRECT("${columnLetter('Hora Fim OP')}"&ROW())-INDIRECT("${columnLetter('Hora Inicio OP')}"&ROW()))*24;"")`,
+// META vem da aba "Metas" (Linha/Maquina -> Meta, coluna F/6ª da aba
+// Metas), por VLOOKUP na Linha/Maquina desta mesma linha — fórmula mantida
+// idêntica à que já existia na planilha (confirmada em 2026-07-28), só
+// generalizada com columnLetter('Linha/Maquina') em vez de "C" fixo.
+'META': `=IFERROR(VLOOKUP(INDIRECT("${columnLetter('Linha/Maquina')}"&ROW());Metas!A:M;6;0);"")`,
+// Tempo ciclo/hora: NOVO cálculo (2026-07-28) — vem da aba Metas por
+// VLOOKUP no Produto desta linha (não mais na Linha/Maquina), coluna
+// "Unidade/hora" da aba Metas (3ª coluna do intervalo B:F). Mesma fórmula
+// que o usuário já usa na planilha, só generalizada com
+// columnLetter('Produto') em vez de "D2" fixo, e envolvida em IFERROR
+// (a original não tinha, mas todos os outros campos calculados aqui têm,
+// pra evitar "#N/A" aparecendo cru na tabela quando o Produto ainda não
+// bate com nenhuma linha da aba Metas).
+'Tempo ciclo/hora': `=IFERROR(VLOOKUP(INDIRECT("${columnLetter('Produto')}"&ROW());Metas!$B$1:$F$57;3;FALSE);"")`,
+// Podutividade/hora (nome com esse typo mesmo na planilha): Producao no
+// Turno dividido por (Disponibilidade em minutos − 90), vezes 60 — os 90
+// minutos são o intervalo fixo (1,5h de "Horas programadas" da aba Metas)
+// descontado do turno. Fórmula idêntica à da planilha, só com
+// columnLetter() no lugar de "G2"/"U2" fixos.
+'Podutividade/hora': `=IFERROR((INDIRECT("${columnLetter('Producao no Turno (Un)')}"&ROW())/(INDIRECT("${columnLetter('Disponibilidade (minutos)')}"&ROW())-90))*60;"")`,
+// Eff % agora é Podutividade/hora ÷ Tempo ciclo/hora (antes era Producao/
+// Meta) — mudança de método de cálculo pedida pelo usuário em 2026-07-28.
+'Eff %': `=IFERROR(INDIRECT("${columnLetter('Podutividade/hora')}"&ROW())/INDIRECT("${columnLetter('Tempo ciclo/hora')}"&ROW());"")`,
+// Disponibilidade (minutos) = (Hora Fim OP - Hora Inicio OP) * 24 * 60 —
+// antes era só *24 (resultado em horas); o usuário mudou pra minutos e
+// renomeou a coluna. Só faz sentido quando o operador preencheu os dois
+// campos nesta linha; quando alguma das duas estiver vazia, a fórmula ainda
+// calcula (célula vazia vira 0 no Sheets), então o dashboard trata isso na
+// exibição (mostra "—" em vez de "0 min" quando falta um dos dois
+// horários) — ver fmtDisponibilidade/COLUMNS_DETALHE.
+'Disponibilidade (minutos)': `=IFERROR((INDIRECT("${columnLetter('Hora Fim OP')}"&ROW())-INDIRECT("${columnLetter('Hora Inicio OP')}"&ROW()))*24*60;"")`,
 };
 
 // Campos exibidos nos formulários de novo registro / edição (todos exceto os calculados).
@@ -503,7 +543,7 @@ const FORM_FIELDS = FIELDS_ALL.filter(f => !(f in COMPUTED_FIELDS));
 // diante) vem por último, na ordem de FIELDS_ALL.
 const FORM_FIELDS_BEFORE_OBS = [
 'Data', 'Ordem de produção', 'Hora Inicio OP', 'Hora Fim OP',
-'Linha/Maquina', 'Operador', 'Producao no Turno (Un)',
+'Linha/Maquina', 'Produto', 'Operador', 'Producao no Turno (Un)',
 ];
 const FORM_FIELDS_FROM_OBS = FORM_FIELDS.filter(f => !FORM_FIELDS_BEFORE_OBS.includes(f));
 
@@ -520,8 +560,8 @@ const FIELD_TEXTAREA = ['Descricao da Ocorrencia', 'Causa Raiz', 'Acao Corretiva
 // célula vazia retorna 0 no Sheets — não é um erro, então IFERROR não pega).
 function fmtDisponibilidade(r){
 if (!r['Hora Inicio OP'] || !r['Hora Fim OP']) return '—';
-const h = num(r['Disponibilidade (horas)']);
-return h == null ? '—' : `${fmtNum(h, 2)} h`;
+const min = num(r['Disponibilidade (minutos)']);
+return min == null ? '—' : `${fmtNum(min, 0)} min`;
 }
 
 // Dashboard 1 — "Detalhe Diário de Bordo": vai de Data até Observações (o
@@ -538,12 +578,13 @@ const COLUMNS_DETALHE = [
 { key: 'Linha/Maquina', label: 'Linha/Máquina' },
 { key: 'Operador', label: 'Operador' },
 { key: 'Producao no Turno (Un)', label: 'Produção (Un)' },
-{ key: 'META', label: 'Meta' },
+{ key: 'Tempo ciclo/hora', label: 'Tempo Ciclo/Hora' },
+{ key: 'Podutividade/hora', label: 'Produtividade/Hora' },
 { key: 'Eff %', label: 'Eff %' },
 { key: 'Tempo de Parada (min)', label: 'Parada (min)' },
 { key: 'Hora Inicio OP', label: 'Início OP' },
 { key: 'Hora Fim OP', label: 'Fim OP' },
-{ key: 'Disponibilidade (horas)', label: 'Disponibilidade (h)', render: fmtDisponibilidade },
+{ key: 'Disponibilidade (minutos)', label: 'Disponibilidade (min)', render: fmtDisponibilidade },
 { key: 'Observacoes', label: 'Observações', wrap: true },
 ];
 
@@ -557,6 +598,7 @@ const COLUMNS_TPM = [
 { key: 'Acao Corretiva', label: 'Ação Corretiva', wrap: true },
 { key: 'Status', label: 'Status', badge: true },
 { key: 'Responsavel', label: 'Responsável' },
+{ key: 'Data de concluão', label: 'Data de Conclusão' },
 ];
 
 // Letra da coluna na planilha (A, B, C...), pela posição real em FIELDS_ALL.
@@ -595,6 +637,7 @@ let lastRows = [];
 const OPTION_STORE = {};
 let RAW_PARADAS_ROWS = []; // linhas cruas da aba PARADAS MAQ, usado para listar as paradas já lançadas de um registro
 let CODIGO_PARADA_OPTIONS = []; // strings "<codigo> - <categoria 1>" para o dropdown de código de parada
+let METAS_MAP = {}; // Linha/Maquina -> [produtos] (aba Metas), para o dropdown dependente de Produto no Novo Registro/Edição
 // Lançamentos de parada ainda não gravados, mantidos em memória enquanto o
 // modal de novo registro/edição está aberto — só viram linhas na aba
 // PARADAS MAQ quando o registro principal é salvo (um único botão de salvar).
@@ -790,6 +833,12 @@ sel('fOperador', [...new Set(ALL_ROWS.map(r => r['Operador']).filter(Boolean))].
 sel('fOrdemProducao', [...new Set(ALL_ROWS.map(r => r['Ordem de produção']).filter(Boolean))].sort());
 sel('fHistLinha', [...new Set(ALL_ROWS.map(r => r['Linha/Maquina']).filter(Boolean))].sort());
 sel('fHistOrdem', [...new Set(ALL_ROWS.map(r => r['Ordem de produção']).filter(Boolean))].sort());
+// Filtro por Status (coluna P) no dashboard TPM.
+sel('fTpmStatus', [...new Set(OPTION_STORE['Status'] || [])]);
+// Filtros do Pareto de Paradas: código de parada (lista de motivos
+// cadastrados na aba CODIGO PARADA) e Linha/Máquina (valores já usados).
+sel('fParetoCodigo', [...new Set(CODIGO_PARADA_OPTIONS)]);
+sel('fParetoLinha', [...new Set(ALL_ROWS.map(r => r['Linha/Maquina']).filter(Boolean))].sort());
 }
 
 // Filtro de período (dia/semana/mês), ancorado na data escolhida em fData —
@@ -986,7 +1035,7 @@ let chartPareto = null;
 // coluna de Data própria — e então aplica o filtro de período dia/semana/
 // mês igual aos outros painéis, agrupando o total de minutos por Código
 // Parada e calculando o % acumulado (Pareto).
-function aggregateParadasPareto(periodo, anchorStr){
+function aggregateParadasPareto(periodo, anchorStr, mesStr, codigoFiltro, linhaFiltro){
 const joined = RAW_PARADAS_ROWS
 .filter(p => p['HORA INICIO'])
 .map(p => {
@@ -994,13 +1043,32 @@ const parentRow = Number(p['LINHA_DIARIO']);
 const parent = RAW_MAIN_ROWS.find(r => r._row === parentRow) || {};
 return {
 Data: parent['Data'],
+linha: parent['Linha/Maquina'] || '',
 codigo: p['CODIGO PARADA'] || 'Não informado',
 duracao: num(p['DURACAO (MIN)']) || 0,
 };
 })
 .filter(x => x.Data);
 
-const filtered = filterRowsByPeriod(joined, periodo, anchorStr);
+let filtered = filterRowsByPeriod(joined, periodo, anchorStr);
+
+// Filtro "Mês a mês" (input type=month, formato "AAAA-MM") — independente
+// do filtro dia/semana/mês acima; quando preenchido, restringe
+// adicionalmente ao mês/ano escolhido, pra navegar mês a mês sem depender
+// de escolher um dia específico dentro do mês.
+if (mesStr){
+const [anoM, mesM] = mesStr.split('-').map(Number);
+filtered = filtered.filter(x => {
+const d = parseBRDate(x.Data);
+return d && d.getFullYear() === anoM && (d.getMonth() + 1) === mesM;
+});
+}
+if (codigoFiltro){
+filtered = filtered.filter(x => x.codigo === codigoFiltro);
+}
+if (linhaFiltro){
+filtered = filtered.filter(x => x.linha === linhaFiltro);
+}
 
 const map = new Map();
 filtered.forEach(x => map.set(x.codigo, (map.get(x.codigo) || 0) + x.duracao));
@@ -1011,10 +1079,11 @@ const arr = Array.from(map.entries())
 
 const total = arr.reduce((s, a) => s + a.duracao, 0);
 let acumulado = 0;
-return arr.map(a => {
+const withPct = arr.map(a => {
 acumulado += a.duracao;
 return { ...a, pctAcumulado: total > 0 ? (acumulado / total) * 100 : 0 };
 });
+return { arr: withPct, total };
 }
 
 function renderParetoChart(){
@@ -1027,7 +1096,13 @@ return;
 }
 const periodo = document.getElementById('fParetoPeriodo').value;
 const anchorStr = document.getElementById('fParetoData').value;
-const arr = aggregateParadasPareto(periodo, anchorStr);
+const mesStr = document.getElementById('fParetoMes').value;
+const codigoFiltro = document.getElementById('fParetoCodigo').value;
+const linhaFiltro = document.getElementById('fParetoLinha').value;
+const { arr, total } = aggregateParadasPareto(periodo, anchorStr, mesStr, codigoFiltro, linhaFiltro);
+
+const totalEl = document.getElementById('paretoTotalTempo');
+if (totalEl) totalEl.innerHTML = `Tempo perdido total no filtro: <strong>${fmtNum(total)} min</strong>`;
 
 if (!arr.length){
 emptyMsg.style.display = 'flex';
@@ -1191,7 +1266,16 @@ function renderTpmTable(){
 const editing = !!accessToken;
 const periodo = document.getElementById('fTpmPeriodo').value;
 const anchorStr = document.getElementById('fTpmData').value;
-const filtered = filterRowsByPeriod(ALL_ROWS, periodo, anchorStr);
+const status = document.getElementById('fTpmStatus').value;
+const dataConclusaoIso = document.getElementById('fTpmDataConclusao').value; // YYYY-MM-DD ou ''
+let filtered = filterRowsByPeriod(ALL_ROWS, periodo, anchorStr);
+if (status){
+filtered = filtered.filter(r => r['Status'] === status);
+}
+if (dataConclusaoIso){
+const alvo = isoToBRStr(dataConclusaoIso);
+filtered = filtered.filter(r => (r['Data de concluão'] || '').trim() === alvo);
+}
 renderColumnsTable(filtered, COLUMNS_TPM, 'tblTpmHeadRow', 'tblTpm', editing, false);
 }
 
@@ -1243,6 +1327,34 @@ tbody.innerHTML = linked.map(({p, parent}) => `
 // =====================================================================
 function fieldLabel(field){
 return `${field.replace('/', ' / ')} <span class="col-tag">(Coluna ${columnLetter(field)})</span>`;
+}
+
+// Campo "Produto" — dropdown DEPENDENTE da Linha/Maquina escolhida (dados da
+// aba Metas, ver METAS_MAP). É um <select> de verdade (não um datalist como
+// os outros campos de lista), porque as opções mudam dinamicamente conforme
+// a Linha/Maquina selecionada, em vez de ser uma lista fixa.
+function produtoOptionsHtml(linha, currentProduto){
+const opts = METAS_MAP[linha] || [];
+return ['<option value="">Selecione…</option>']
+.concat(opts.map(p => `<option value="${p}"${p === currentProduto ? ' selected' : ''}>${p}</option>`))
+.join('');
+}
+function produtoFieldRowHtml(mode, linha, currentProduto){
+return `<div class="field-row"><label>${fieldLabel('Produto')}</label>
+<select name="Produto" id="produtoSelect_${mode}">${produtoOptionsHtml(linha, currentProduto)}</select></div>`;
+}
+// Sempre que o campo Linha/Maquina (input com datalist) mudar, atualiza as
+// opções do <select> de Produto correspondente — dropdown em cascata,
+// conforme pedido ("aparecer nas opções os produtos relacionados com a
+// opção selecionada no campo Linha/Maquina"). Chamado logo depois de montar
+// o formulário (openNewRecordModal/openEditModal).
+function attachProdutoCascade(form, mode){
+const linhaInput = form.querySelector('[name="Linha/Maquina"]');
+if (!linhaInput) return;
+linhaInput.addEventListener('input', () => {
+const sel = document.getElementById('produtoSelect_' + mode);
+if (sel) sel.innerHTML = produtoOptionsHtml(linhaInput.value, '');
+});
 }
 
 function fieldRowHtml(field, currentValue, idPrefix){
@@ -1334,7 +1446,7 @@ list.innerHTML = paradaRowIds[mode].length
 }
 // Colunas de cada linha de parada, na ordem visual (usado pela navegação por
 // teclado abaixo) — Início, Fim, Código Parada.
-const PARADA_ROW_COLS = ['.pr-inicio', '.pr-fim', '.pr-codigo'];
+const PARADA_ROW_COLS = ['.pr-inicio', '.pr-fim', '.pr-codigo', '.pr-obs'];
 function paradaRowHtml(mode, id){
 const opts = CODIGO_PARADA_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
 const nav = `onkeydown="handleParadaKeyNav(event, '${mode}')"`;
@@ -1342,6 +1454,7 @@ return `<div class="parada-row" id="paradaRow_${mode}_${id}">
 <div><label>Início</label><input type="time" class="pr-inicio" ${nav}></div>
 <div><label>Fim</label><input type="time" class="pr-fim" ${nav}></div>
 <div><label>Código Parada</label><select class="pr-codigo" ${nav}><option value="">Selecione…</option>${opts}</select></div>
+<div><label>Observação</label><input type="text" class="pr-obs" ${nav} placeholder="Observação (opcional)"></div>
 <button type="button" class="btn icon-btn" title="Remover" tabindex="-1" onclick="removeParadaRow('${mode}', ${id})">✕</button>
 </div>`;
 }
@@ -1393,7 +1506,8 @@ if (!row) return;
 const inicio = row.querySelector('.pr-inicio').value;
 const fim = row.querySelector('.pr-fim').value;
 const codigo = row.querySelector('.pr-codigo').value;
-if (inicio && fim) entries.push({ inicio, fim, codigo });
+const observacao = row.querySelector('.pr-obs').value.trim();
+if (inicio && fim) entries.push({ inicio, fim, codigo, observacao });
 });
 return entries;
 }
@@ -1405,6 +1519,7 @@ const dataByField = {
 'HORA FIM': entry.fim,
 'CODIGO PARADA': entry.codigo,
 'LINHA_DIARIO': linhaDiario,
+'Observacao': entry.observacao || '',
 };
 return FIELDS_PARADAS.map(f => (f in COMPUTED_FIELDS_PARADAS) ? COMPUTED_FIELDS_PARADAS[f] : (dataByField[f] ?? ''));
 }
@@ -1421,6 +1536,7 @@ const rows = linked.map(r => `<div class="parada-row parada-row-readonly">
 <div>${r['HORA INICIO']} – ${r['HORA FIM']}</div>
 <div>${r['CODIGO PARADA'] || '—'}</div>
 <div>${fmtNum(num(r['DURACAO (MIN)']) || 0)} min</div>
+<div>${r['Observacao'] || '—'}</div>
 </div>`).join('');
 return `<div class="paradas-existing">${rows}<div class="paradas-total">Já lançado: <strong>${fmtNum(total)} min</strong></div></div>`;
 }
@@ -1447,10 +1563,13 @@ document.getElementById('viewParadasOverlay').classList.remove('open');
 function openNewRecordModal(){
 const form = document.getElementById('newRecordForm');
 paradaRowIds.new = [];
-form.innerHTML = FORM_FIELDS_BEFORE_OBS.map(field => fieldRowHtml(field, '', 'dl_new')).join('')
+form.innerHTML = FORM_FIELDS_BEFORE_OBS.map(field =>
+field === 'Produto' ? produtoFieldRowHtml('new', '', '') : fieldRowHtml(field, '', 'dl_new')
+).join('')
 + paradasSectionHtml('new')
 + FORM_FIELDS_FROM_OBS.map(field => fieldRowHtml(field, '', 'dl_new')).join('');
 renderParadasRows('new');
+attachProdutoCascade(form, 'new');
 document.getElementById('newRecordOverlay').classList.add('open');
 }
 function closeNewRecordModal(){
@@ -1486,10 +1605,13 @@ if (!row) return;
 const form = document.getElementById('editForm');
 form.dataset.row = rowNum;
 paradaRowIds.edit = [];
-form.innerHTML = FORM_FIELDS_BEFORE_OBS.map(field => fieldRowHtml(field, row[field] || '', 'dl_edit')).join('')
+form.innerHTML = FORM_FIELDS_BEFORE_OBS.map(field =>
+field === 'Produto' ? produtoFieldRowHtml('edit', row['Linha/Maquina'] || '', row['Produto'] || '') : fieldRowHtml(field, row[field] || '', 'dl_edit')
+).join('')
 + paradasSectionHtml('edit', existingParadasHtml(rowNum))
 + FORM_FIELDS_FROM_OBS.map(field => fieldRowHtml(field, row[field] || '', 'dl_edit')).join('');
 renderParadasRows('edit');
+attachProdutoCascade(form, 'edit');
 document.getElementById('editOverlay').classList.add('open');
 }
 function closeEditModal(){
@@ -1574,6 +1696,7 @@ const fetches = [fetch(csvUrl(GID_MAIN), {cache:'no-store'})];
 DROPDOWN_FIELDS.forEach(d => fetches.push(fetch(csvUrl(d.gid), {cache:'no-store'})));
 fetches.push(fetch(csvUrl(GID_PARADAS), {cache:'no-store'}));
 fetches.push(fetch(csvUrl(GID_CODIGO_PARADA), {cache:'no-store'}));
+fetches.push(fetch(csvUrl(GID_METAS), {cache:'no-store'}));
 const responses = await Promise.all(fetches);
 
 if (!responses[0].ok) throw new Error('Falha ao buscar dados da planilha');
@@ -1609,6 +1732,22 @@ const parsedCodigo = parseCSV(await codigoRes.text());
 CODIGO_PARADA_OPTIONS = parsedCodigo.data
 .filter(r => r['CODIGO'])
 .map(r => `${r['CODIGO']} - ${r['CATEGORIA 1']}`);
+}
+
+// Aba Metas: monta o mapa Linha/Maquina -> [produtos], usado pelo dropdown
+// dependente de Produto no Novo Registro/Edição.
+const metasRes = responses[3 + DROPDOWN_FIELDS.length];
+if (metasRes && metasRes.ok){
+const parsedMetas = parseCSV(await metasRes.text());
+const map = {};
+parsedMetas.data.forEach(r => {
+const linha = r['Linha/Maquina'];
+const produto = r['Produto'];
+if (!linha || !produto) return;
+if (!map[linha]) map[linha] = [];
+if (!map[linha].includes(produto)) map[linha].push(produto);
+});
+METAS_MAP = map;
 }
 
 document.getElementById('sourceLabel').textContent =
