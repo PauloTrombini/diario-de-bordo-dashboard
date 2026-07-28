@@ -128,7 +128,7 @@ align-items:center; justify-content:center; z-index:50; padding:20px;
 .overlay.open{ display:flex; }
 .modal{
 background:var(--panel); border:1px solid var(--border); border-radius:14px;
-width:90vw; height:90vh; max-width:none; overflow:auto; padding:26px 32px;
+width:98vw; height:96vh; max-width:none; overflow:auto; padding:26px 32px;
 display:flex; flex-direction:column;
 }
 .modal h3{ margin:0 0 4px; font-size:17px; }
@@ -564,6 +564,25 @@ const min = num(r['Disponibilidade (minutos)']);
 return min == null ? '—' : `${fmtNum(min, 0)} min`;
 }
 
+// Podutividade/hora exibida com 2 casas decimais (pedido do usuário —
+// antes mostrava o valor cru da planilha, com muitas casas, ex: 36,14457831).
+function fmtProdutividade(r){
+const v = num(r['Podutividade/hora']);
+return v == null ? '—' : fmtNum(v, 2);
+}
+
+// Horas Úteis = Disponibilidade (min) − Parada (min) — coluna nova (pedido
+// do usuário), calculada só no dashboard (não existe na planilha), por isso
+// não tem "Coluna X" associada (ver renderColumnsTable, que omite o rótulo
+// de coluna quando columnLetter() não encontra o campo em FIELDS_ALL).
+function fmtHorasUteis(r){
+if (!r['Hora Inicio OP'] || !r['Hora Fim OP']) return '—';
+const disp = num(r['Disponibilidade (minutos)']);
+if (disp == null) return '—';
+const parada = num(r['Tempo de Parada (min)']) || 0;
+return `${fmtNum(disp - parada, 0)} min`;
+}
+
 // Dashboard 1 — "Detalhe Diário de Bordo": vai de Data até Observações (o
 // núcleo operacional do registro: quem, onde, quanto produziu, meta, Eff%,
 // parada, e agora também o início/fim da OP e a Disponibilidade calculada),
@@ -578,13 +597,14 @@ const COLUMNS_DETALHE = [
 { key: 'Linha/Maquina', label: 'Linha/Máquina' },
 { key: 'Operador', label: 'Operador' },
 { key: 'Producao no Turno (Un)', label: 'Produção (Un)' },
-{ key: 'Tempo ciclo/hora', label: 'Tempo Ciclo/Hora' },
-{ key: 'Podutividade/hora', label: 'Produtividade/Hora' },
+{ key: 'Tempo ciclo/hora', label: 'Temp. Ciclo/h' },
+{ key: 'Podutividade/hora', label: 'Prod./h', render: fmtProdutividade },
 { key: 'Eff %', label: 'Eff %' },
-{ key: 'Tempo de Parada (min)', label: 'Parada (min)' },
 { key: 'Hora Inicio OP', label: 'Início OP' },
 { key: 'Hora Fim OP', label: 'Fim OP' },
-{ key: 'Disponibilidade (minutos)', label: 'Disponibilidade (min)', render: fmtDisponibilidade },
+{ key: 'Disponibilidade (minutos)', label: 'Disp. (min)', render: fmtDisponibilidade },
+{ key: 'Tempo de Parada (min)', label: 'Parada (min)' },
+{ key: 'Horas Uteis', label: 'Horas Úteis', render: fmtHorasUteis },
 { key: 'Observacoes', label: 'Observações', wrap: true },
 ];
 
@@ -1232,9 +1252,14 @@ renderColumnsTable(rows, COLUMNS_DETALHE, 'tblDetalheHeadRow', 'tblDetalhe', edi
 // colunas visíveis naquela tabela.
 function renderColumnsTable(rows, columns, headRowId, tableId, editing, colorByEff = true){
 const headRow = document.getElementById(headRowId);
-headRow.innerHTML = columns.map(c =>
-`<th>${c.label}<br><span class="col-tag-th">(Coluna ${columnLetter(c.key)})</span></th>`
-).join('') + '<th></th>';
+// 'Horas Uteis' (Detalhe) é calculada só no dashboard, não existe na
+// planilha — por isso não tem letra de coluna própria. columnLetter()
+// retorna '' nesse caso; omitimos o rótulo "(Coluna X)" quando isso acontece,
+// em vez de mostrar "(Coluna )" vazio.
+headRow.innerHTML = columns.map(c => {
+const col = columnLetter(c.key);
+return `<th>${c.label}${col ? `<br><span class="col-tag-th">(Coluna ${col})</span>` : ''}</th>`;
+}).join('') + '<th></th>';
 
 const tbody = document.querySelector('#' + tableId + ' tbody');
 if (!rows.length){
@@ -1713,7 +1738,11 @@ const res = responses[i+1];
 if (!res.ok) continue;
 const parsed = parseCSV(await res.text());
 const col = parsed.headers[0];
-OPTION_STORE[DROPDOWN_FIELDS[i].field] = parsed.data.map(r => r[col]).filter(v => v);
+// dedupe (Set) — a aba de apoio (ex.: Linha_Maquina) tinha entradas
+// repetidas (ex.: "CAIBRO" aparecendo 3x no dropdown do Novo Registro),
+// provavelmente de lançamentos anteriores via ensureListValue(); em vez de
+// depender de limpar a planilha, o dashboard sempre exibe só valores únicos.
+OPTION_STORE[DROPDOWN_FIELDS[i].field] = [...new Set(parsed.data.map(r => r[col]).filter(v => v))];
 }
 
 // Aba PARADAS MAQ: lançamentos individuais de parada, vinculados a uma
