@@ -454,16 +454,18 @@ const DROPDOWN_FIELDS = [
 // - 'Produto' (coluna D) foi adicionada logo depois de 'Linha/Maquina' —
 //   escolhido no Novo Registro via dropdown dependente da Linha/Maquina
 //   (dados vêm da aba Metas: Linha/Maquina -> Produto).
-// - 'Tempo ciclo/hora' (I) e 'Podutividade/hora' (J, nome com esse typo
-//   mesmo na planilha) foram adicionadas entre META e Eff % — fazem parte
+// - 'Tempo ciclo/hora' (I) e 'Prod./hora' (J — o usuário renomeou de
+//   "Podutividade/hora" pra "Prod./hora" direto na planilha em 2026-07-28,
+//   depois da nossa última verificação; sempre confirme o cabeçalho real
+//   antes de assumir) foram adicionadas entre META e Eff % — fazem parte
 //   do novo método de cálculo de Eff % (antes era Producao/Meta, agora é
-//   Podutividade/hora ÷ Tempo ciclo/hora).
+//   Prod./hora ÷ Tempo ciclo/hora).
 // - 'Data de concluão' (R, typo mantido — é o nome real da coluna) foi
 //   adicionada depois de Responsavel — preenchida manualmente pelo
 //   usuário, não é fórmula.
 // - 'Disponibilidade (horas)' foi renomeada para 'Disponibilidade
 //   (minutos)' e a fórmula mudou de horas para minutos.
-// 'Tempo de Parada (min)', 'META', 'Tempo ciclo/hora', 'Podutividade/hora',
+// 'Tempo de Parada (min)', 'META', 'Tempo ciclo/hora', 'Prod./hora',
 // 'Eff %' e 'Disponibilidade (minutos)' são todos calculados por fórmula e
 // nunca são digitados pelo usuário — ver FORM_FIELDS abaixo.
 // A ORDEM DE EXIBIÇÃO no formulário (Produto perto de Linha/Maquina, Hora
@@ -473,7 +475,7 @@ const DROPDOWN_FIELDS = [
 const FIELDS_ALL = [
 'Data', 'Ordem de produção', 'Linha/Maquina', 'Produto', 'Operador',
 'Tempo de Parada (min)', 'Producao no Turno (Un)',
-'META', 'Tempo ciclo/hora', 'Podutividade/hora', 'Eff %',
+'META', 'Tempo ciclo/hora', 'Prod./hora', 'Eff %',
 'Observacoes', 'Descricao da Ocorrencia', 'Causa Raiz',
 'Acao Corretiva', 'Status', 'Responsavel', 'Data de concluão',
 'Hora Inicio OP', 'Hora Fim OP', 'Disponibilidade (minutos)',
@@ -512,15 +514,16 @@ const COMPUTED_FIELDS = {
 // pra evitar "#N/A" aparecendo cru na tabela quando o Produto ainda não
 // bate com nenhuma linha da aba Metas).
 'Tempo ciclo/hora': `=IFERROR(VLOOKUP(INDIRECT("${columnLetter('Produto')}"&ROW());Metas!$B$1:$F$57;3;FALSE);"")`,
-// Podutividade/hora (nome com esse typo mesmo na planilha): Producao no
-// Turno dividido por (Disponibilidade em minutos − 90), vezes 60 — os 90
-// minutos são o intervalo fixo (1,5h de "Horas programadas" da aba Metas)
-// descontado do turno. Fórmula idêntica à da planilha, só com
-// columnLetter() no lugar de "G2"/"U2" fixos.
-'Podutividade/hora': `=IFERROR((INDIRECT("${columnLetter('Producao no Turno (Un)')}"&ROW())/(INDIRECT("${columnLetter('Disponibilidade (minutos)')}"&ROW())-90))*60;"")`,
-// Eff % agora é Podutividade/hora ÷ Tempo ciclo/hora (antes era Producao/
+// Prod./hora (coluna J — renomeada pelo usuário de "Podutividade/hora"
+// para "Prod./hora" direto na planilha): Producao no Turno dividido por
+// (Disponibilidade em minutos − 90), vezes 60 — os 90 minutos são o
+// intervalo fixo (1,5h de "Horas programadas" da aba Metas) descontado do
+// turno. Fórmula idêntica à da planilha, só com columnLetter() no lugar de
+// "G2"/"U2" fixos.
+'Prod./hora': `=IFERROR((INDIRECT("${columnLetter('Producao no Turno (Un)')}"&ROW())/(INDIRECT("${columnLetter('Disponibilidade (minutos)')}"&ROW())-90))*60;"")`,
+// Eff % agora é Prod./hora ÷ Tempo ciclo/hora (antes era Producao/
 // Meta) — mudança de método de cálculo pedida pelo usuário em 2026-07-28.
-'Eff %': `=IFERROR(INDIRECT("${columnLetter('Podutividade/hora')}"&ROW())/INDIRECT("${columnLetter('Tempo ciclo/hora')}"&ROW());"")`,
+'Eff %': `=IFERROR(INDIRECT("${columnLetter('Prod./hora')}"&ROW())/INDIRECT("${columnLetter('Tempo ciclo/hora')}"&ROW());"")`,
 // Disponibilidade (minutos) = (Hora Fim OP - Hora Inicio OP) * 24 * 60 —
 // antes era só *24 (resultado em horas); o usuário mudou pra minutos e
 // renomeou a coluna. Só faz sentido quando o operador preencheu os dois
@@ -564,10 +567,10 @@ const min = num(r['Disponibilidade (minutos)']);
 return min == null ? '—' : `${fmtNum(min, 0)} min`;
 }
 
-// Podutividade/hora exibida com 2 casas decimais (pedido do usuário —
-// antes mostrava o valor cru da planilha, com muitas casas, ex: 36,14457831).
+// Prod./hora exibida com 2 casas decimais (pedido do usuário — antes
+// mostrava o valor cru da planilha, com muitas casas, ex: 36,14457831).
 function fmtProdutividade(r){
-const v = num(r['Podutividade/hora']);
+const v = num(r['Prod./hora']);
 return v == null ? '—' : fmtNum(v, 2);
 }
 
@@ -598,7 +601,7 @@ const COLUMNS_DETALHE = [
 { key: 'Operador', label: 'Operador' },
 { key: 'Producao no Turno (Un)', label: 'Produção (Un)' },
 { key: 'Tempo ciclo/hora', label: 'Temp. Ciclo/h' },
-{ key: 'Podutividade/hora', label: 'Prod./h', render: fmtProdutividade },
+{ key: 'Prod./hora', label: 'Prod./h', render: fmtProdutividade },
 { key: 'Eff %', label: 'Eff %' },
 { key: 'Hora Inicio OP', label: 'Início OP' },
 { key: 'Hora Fim OP', label: 'Fim OP' },
