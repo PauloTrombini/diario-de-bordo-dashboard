@@ -621,7 +621,7 @@ const COLUMNS_TPM = [
 { key: 'Acao Corretiva', label: 'Ação Corretiva', wrap: true },
 { key: 'Status', label: 'Status', badge: true },
 { key: 'Responsavel', label: 'Responsável' },
-{ key: 'Data de concluão', label: 'Data de Conclusão' },
+{ key: 'Data de concluão', label: 'Data de Conclusão', render: r => normalizeSheetDateBR(r['Data de concluão']) || '—' },
 ];
 
 // Letra da coluna na planilha (A, B, C...), pela posição real em FIELDS_ALL.
@@ -702,6 +702,27 @@ function isoToBRStr(iso){
 const m = String(iso).trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
 if (!m) return iso;
 return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+// "Data de concluão" (TPM, coluna R) é preenchida manualmente pelo usuário
+// e pode virar uma DATA de verdade no Google Sheets (não texto) — nesse
+// caso o CSV exporta um número de série (ex.: "46249") em vez de
+// "DD/MM/AAAA", porque células de data são só números formatados por trás.
+// Serial 0 = 1899-12-30 (mesma convenção do Excel); 25569 é a diferença em
+// dias até 1970-01-01 (época do JS), fórmula padrão de conversão.
+function excelSerialToBRDate(serial){
+const utcDays = Math.floor(Number(serial)) - 25569;
+const d = new Date(utcDays * 86400000);
+return fmtDateBR(new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+// Normaliza qualquer um dos dois formatos (texto "DD/MM/AAAA" ou número de
+// série) pra sempre exibir/comparar como "DD/MM/AAAA".
+function normalizeSheetDateBR(v){
+if (!v) return '';
+const s = String(v).trim();
+if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;
+if (/^\d+(\.\d+)?$/.test(s)) return excelSerialToBRDate(s);
+return s;
 }
 
 // Datas reais da planilha (Data, coluna A) chegam como "DD/MM/AAAA" (texto).
@@ -1302,7 +1323,7 @@ filtered = filtered.filter(r => r['Status'] === status);
 }
 if (dataConclusaoIso){
 const alvo = isoToBRStr(dataConclusaoIso);
-filtered = filtered.filter(r => (r['Data de concluão'] || '').trim() === alvo);
+filtered = filtered.filter(r => normalizeSheetDateBR(r['Data de concluão']) === alvo);
 }
 renderColumnsTable(filtered, COLUMNS_TPM, 'tblTpmHeadRow', 'tblTpm', editing, false);
 }
