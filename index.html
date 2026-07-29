@@ -431,6 +431,14 @@ const GID_CODIGO_PARADA = '1991757817';
 const TAB_METAS = 'Metas';
 const GID_METAS = '1280024266';
 
+// Aba "Faixas Eff": permite definir os limiares mínimos (%) de cada faixa
+// de cor da coluna Eff % (K) direto na planilha, sem mexer no código — criada
+// em 2026-07-29 a pedido do usuário. Colunas: Faixa (Verde/Amarelo/Vermelho),
+// Minimo (%), Maximo (%) — Maximo é só informativo; o cálculo usa apenas o
+// Minimo de Verde e de Amarelo (abaixo do mínimo de Amarelo cai em Vermelho).
+const TAB_FAIXAS_EFF = 'Faixas Eff';
+const GID_FAIXAS_EFF = '1163084855';
+
 // 'Tipo de Ocorrencia' foi REMOVIDO da aba principal pelo usuário direto no
 // Google Sheets (o motivo da parada agora é lançado por evento, via "Código
 // Parada" na aba PARADAS MAQ, em vez de um único campo por registro).
@@ -644,8 +652,8 @@ return String(v).includes('%') || Math.abs(n) > 1.5 ? n : n * 100;
 function effRowClass(v){
 const pct = effRatio(v);
 if (pct == null) return '';
-if (pct >= 75) return 'eff-good';
-if (pct >= 60) return 'eff-warn';
+if (pct >= EFF_THRESHOLDS.verde) return 'eff-good';
+if (pct >= EFF_THRESHOLDS.amarelo) return 'eff-warn';
 return 'eff-bad';
 }
 
@@ -658,6 +666,10 @@ let ALL_ROWS = [];
 let RAW_MAIN_ROWS = []; // todas as linhas cruas (incluindo linhas-template em branco), usado para achar a próxima linha livre e para juntar dados no histórico de paradas
 let lastRows = [];
 const OPTION_STORE = {};
+// Limiares (%) das faixas de cor do Eff % — valores padrão (mesmos que já
+// eram fixos no código); sobrescritos pela aba "Faixas Eff" quando presente
+// e válida (ver refresh()).
+let EFF_THRESHOLDS = { verde: 75, amarelo: 60 };
 let RAW_PARADAS_ROWS = []; // linhas cruas da aba PARADAS MAQ, usado para listar as paradas já lançadas de um registro
 let CODIGO_PARADA_OPTIONS = []; // strings "<codigo> - <categoria 1>" para o dropdown de código de parada
 let METAS_MAP = {}; // Linha/Maquina -> [produtos] (aba Metas), para o dropdown dependente de Produto no Novo Registro/Edição
@@ -952,8 +964,8 @@ let chartProducaoMeta = null;
 
 function effColor(pct){
 if (pct == null) return '#8f9ac0';
-if (pct >= 75) return '#2fd08a';
-if (pct >= 60) return '#f5b942';
+if (pct >= EFF_THRESHOLDS.verde) return '#2fd08a';
+if (pct >= EFF_THRESHOLDS.amarelo) return '#f5b942';
 return '#f5615c';
 }
 
@@ -1746,6 +1758,7 @@ DROPDOWN_FIELDS.forEach(d => fetches.push(fetch(csvUrl(d.gid), {cache:'no-store'
 fetches.push(fetch(csvUrl(GID_PARADAS), {cache:'no-store'}));
 fetches.push(fetch(csvUrl(GID_CODIGO_PARADA), {cache:'no-store'}));
 fetches.push(fetch(csvUrl(GID_METAS), {cache:'no-store'}));
+fetches.push(fetch(csvUrl(GID_FAIXAS_EFF), {cache:'no-store'}));
 const responses = await Promise.all(fetches);
 
 if (!responses[0].ok) throw new Error('Falha ao buscar dados da planilha');
@@ -1801,6 +1814,19 @@ if (!map[linha]) map[linha] = [];
 if (!map[linha].includes(produto)) map[linha].push(produto);
 });
 METAS_MAP = map;
+}
+
+// Aba Faixas Eff: sobrescreve EFF_THRESHOLDS (verde/amarelo) só se a aba
+// existir e tiver linhas válidas; senão mantém os valores padrão (75/60).
+const faixasRes = responses[4 + DROPDOWN_FIELDS.length];
+if (faixasRes && faixasRes.ok){
+const parsedFaixas = parseCSV(await faixasRes.text());
+const verdeRow = parsedFaixas.data.find(r => (r['Faixa'] || '').trim().toLowerCase() === 'verde');
+const amareloRow = parsedFaixas.data.find(r => (r['Faixa'] || '').trim().toLowerCase() === 'amarelo');
+const verdeMin = verdeRow ? Number(String(verdeRow['Minimo (%)']).trim().replace(',', '.')) : NaN;
+const amareloMin = amareloRow ? Number(String(amareloRow['Minimo (%)']).trim().replace(',', '.')) : NaN;
+if (!Number.isNaN(verdeMin)) EFF_THRESHOLDS.verde = verdeMin;
+if (!Number.isNaN(amareloMin)) EFF_THRESHOLDS.amarelo = amareloMin;
 }
 
 document.getElementById('sourceLabel').textContent =
