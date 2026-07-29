@@ -200,6 +200,40 @@ header{ padding:14px 16px; }
 main{ padding:14px 12px 40px; }
 .kpis{ grid-template-columns:repeat(2, 1fr); gap:10px; }
 .right-controls .btn{ flex:1 1 auto; text-align:center; }
+
+/* Ajustes extras de smartphone (mesmo arquivo/URL da versão desktop —
+   essas regras só entram em vigor abaixo de 640px de largura de tela,
+   então o layout "denso" de desktop continua intacto acima disso). */
+
+/* Alvos de toque maiores nos filtros, campos do modal e botões — o padrão
+   de desktop (padding ~8-9px) fica pequeno demais pra tocar com o dedo. */
+.filters select, .filters input,
+.field-row input, .field-row select, .field-row textarea,
+.parada-row input, .parada-row select{ min-height:44px; }
+.btn:not(.icon-btn){ min-height:44px; }
+.icon-btn{ padding:9px 11px; font-size:15px; }
+
+/* Filtros empilhados e ocupando a largura toda (em vez de caixas estreitas
+   soltas no meio da tela). */
+.filters{ flex-direction:column; align-items:stretch; }
+.filters select, .filters input{ width:100%; min-width:0; }
+.filters .filter-label{ margin-right:0; margin-top:4px; }
+
+/* Primeira coluna das tabelas fixa (sticky) durante o scroll horizontal,
+   pra sempre saber a que linha/data aquele valor se refere ao arrastar a
+   tabela pro lado com o dedo. */
+.table-scroll table th:first-child, .table-scroll table td:first-child{
+position:sticky; left:0; z-index:1; background:var(--panel);
+}
+.panel-light .table-scroll table th:first-child{ background:#f4f6fa; }
+.panel-light .table-scroll table td:first-child{ background:#f4f6fa; }
+.panel-light .table-scroll tr.eff-good td:first-child{ background:#d7f5e6; }
+.panel-light .table-scroll tr.eff-warn td:first-child{ background:#fef0cf; }
+.panel-light .table-scroll tr.eff-bad td:first-child{ background:#fbdbd9; }
+
+/* Gráficos mais baixos pra não exigir tanto scroll vertical numa tela pequena. */
+.chart-canvas-wrap{ height:260px; }
+.panel.chart-panel-fullscreen .chart-canvas-wrap{ height:calc(100vh - 160px); }
 }
 </style>
 </head>
