@@ -354,7 +354,7 @@ main{ padding:14px 12px 40px; }
 <div class="overlay" id="newRecordOverlay">
 <div class="modal">
 <h3>Novo Registro</h3>
-<div class="modal-sub">Cria uma linha na aba "Diario de Bordo". O Tempo de Parada é a soma das paradas lançadas abaixo (aba "PARADAS MAQ").</div>
+<div class="modal-sub">Cria uma linha na aba "Diario de Bordo". O Tempo de Parada é a soma das paradas lançadas abaixo (aba "Histórico Paradas").</div>
 <form id="newRecordForm" class="field-grid"></form>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeNewRecordModal()">Cancelar</button>
@@ -379,7 +379,7 @@ main{ padding:14px 12px 40px; }
 <div class="overlay" id="editParadaOverlay">
 <div class="modal" style="max-width:480px;">
 <h3>Editar Parada</h3>
-<div class="modal-sub">Corrige este lançamento direto na aba "PARADAS MAQ".</div>
+<div class="modal-sub">Corrige este lançamento direto na aba "Histórico Paradas".</div>
 <form id="editParadaForm">
 <div class="field-row"><label>Início</label><input type="time" id="epInicio"></div>
 <div class="field-row"><label>Fim</label><input type="time" id="epFim"></div>
@@ -418,9 +418,19 @@ const GID_MAIN = '1700278622';
 // inserções de linha em qualquer uma das abas.
 // Colunas reais (A→K): Data, Ordem de Produção, Máquina, Operador,
 // Hora Início, Hora Fim, Código Motivo, Motivo, Observação, Duração (min),
-// LINHA_DIARIO. As duas últimas são técnicas (não pedidas explicitamente
-// pelo usuário, mas necessárias: Duração pra somar no Diario de Bordo,
-// LINHA_DIARIO pra saber a qual registro cada parada pertence).
+// LINHA_DIARIO. Duração é técnica (soma no Diario de Bordo).
+// LINHA_DIARIO existe só como registro histórico de qual linha do Diario
+// de Bordo estava sendo editada no momento do lançamento — NÃO é mais
+// usada pra vincular as paradas ao registro-pai (ver 2ª correção de
+// 2026-07-31 abaixo). Motivo da troca: LINHA_DIARIO guarda um número de
+// linha fixo, e se uma linha ANTERIOR do Diario de Bordo for excluída
+// depois, todas as linhas abaixo sobem de posição mas esse número
+// gravado não muda — o vínculo quebra silenciosamente (foi o que
+// aconteceu com um registro cujas paradas ficaram "órfãs" depois que um
+// registro de teste acima foi apagado). O vínculo agora é feito pela
+// "Ordem de Produção" (coluna B aqui e coluna B do Diario de Bordo) — um
+// valor de negócio que o próprio operador digita e que não se move
+// quando linhas são inseridas/excluídas em qualquer uma das abas.
 // PARADAS MAQ foi mantida intocada (sem uso pelo dashboard a partir de
 // agora) até o usuário confirmar que pode ser excluída.
 const TAB_PARADAS = 'Histórico Paradas';
@@ -527,12 +537,28 @@ const FIELDS_ALL = [
 // porque a fórmula nunca chega a compilar. Use 0 em vez de FALSE no último
 // argumento do VLOOKUP para evitar ter que traduzir o booleano (FALSO).
 const COMPUTED_FIELDS = {
-// Tempo de Parada (min) agora é a SOMA de todos os lançamentos da aba
-// PARADAS MAQ vinculados a esta linha (coluna LINHA_DIARIO = número desta
-// linha no Diario de Bordo) — não é mais um único intervalo Hora
-// Inicio/Hora Fim desta mesma linha. Isso permite registrar várias paradas
-// (com motivo) ao longo do turno e ver o total aqui automaticamente.
-'Tempo de Parada (min)': '=IFERROR(SUMIF(\'PARADAS MAQ\'!$D:$D;ROW();\'PARADAS MAQ\'!$E:$E);0)',
+// Tempo de Parada (min) é a SOMA de todos os lançamentos da aba
+// "Histórico Paradas" vinculados a esta linha — não é mais um único
+// intervalo Hora Inicio/Hora Fim desta mesma linha. Isso permite
+// registrar várias paradas (com motivo) ao longo do turno e ver o total
+// aqui automaticamente.
+// Atualizado em 2026-07-31 (2ª correção do dia): o vínculo deixou de ser
+// por número de linha (LINHA_DIARIO = ROW()) e passou a ser pela "Ordem
+// de Produção" (valor que o operador digita, já denormalizado em cada
+// linha de Histórico Paradas). Motivo: LINHA_DIARIO é a posição física da
+// linha no momento em que a parada foi lançada — se uma linha ANTERIOR do
+// Diario de Bordo for excluída depois (ex.: apagar um registro de teste),
+// todas as linhas abaixo sobem uma posição, mas o número gravado em
+// LINHA_DIARIO não muda, e o vínculo quebra (foi exatamente o que
+// aconteceu com o registro da Ordem 6192: virou linha 5 depois que a
+// linha 5 antiga — um teste — foi apagada, mas suas paradas continuaram
+// com LINHA_DIARIO=6). Ordem de Produção é um valor de negócio estável
+// (não se move quando linhas são inseridas/excluídas), então é uma chave
+// de vínculo muito mais robusta. Esta constante é reaplicada TODA VEZ que
+// um registro é criado/editado (buildRowValues), então precisa ficar em
+// sincronia com TAB_PARADAS ou o total volta a zerar no próximo
+// salvamento.
+'Tempo de Parada (min)': `=IFERROR(SUMIF('Histórico Paradas'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Paradas'!$J:$J);0)`,
 // META vem da aba "Metas" (Linha/Maquina -> Meta, coluna F/6ª da aba
 // Metas), por VLOOKUP na Linha/Maquina desta mesma linha — fórmula mantida
 // idêntica à que já existia na planilha (confirmada em 2026-07-28), só
@@ -1612,8 +1638,14 @@ return {
 // Lista (read-only) das paradas já gravadas na aba Histórico Paradas para
 // uma linha do Diario de Bordo, usada tanto no modal de edição quanto na
 // consulta "Ver Paradas".
-function existingParadasHtml(rowNum){
-const linked = RAW_PARADAS_ROWS.filter(r => Number(r['LINHA_DIARIO']) === rowNum && r['Hora Início']);
+// Vínculo por "Ordem de Produção" (não mais por LINHA_DIARIO/número de
+// linha — ver comentário em COMPUTED_FIELDS acima) — por isso recebe
+// ordemProducao do registro-pai, além do rowNum (que continua sendo
+// usado só pra reabrir o modal certo depois de editar/excluir uma parada).
+function existingParadasHtml(rowNum, ordemProducao){
+const linked = ordemProducao
+? RAW_PARADAS_ROWS.filter(r => r['Ordem de Produção'] === ordemProducao && r['Hora Início'])
+: [];
 if (!linked.length){
 return '<div class="paradas-existing hint">Nenhuma parada lançada ainda para este registro.</div>';
 }
@@ -1733,7 +1765,7 @@ const sub = row
 ? `${row['Data'] || ''} · ${row['Ordem de produção'] || ''} · ${row['Linha/Maquina'] || ''} · ${row['Operador'] || ''}`
 : '';
 document.getElementById('viewParadasSub').textContent = sub;
-document.getElementById('viewParadasBody').innerHTML = existingParadasHtml(rowNum);
+document.getElementById('viewParadasBody').innerHTML = existingParadasHtml(rowNum, row ? row['Ordem de produção'] : '');
 document.getElementById('viewParadasOverlay').classList.add('open');
 }
 function closeParadasViewModal(){
@@ -1792,7 +1824,7 @@ paradaRowIds.edit = [];
 form.innerHTML = FORM_FIELDS_BEFORE_OBS.map(field =>
 field === 'Produto' ? produtoFieldRowHtml('edit', row['Linha/Maquina'] || '', row['Produto'] || '') : fieldRowHtml(field, row[field] || '', 'dl_edit')
 ).join('')
-+ paradasSectionHtml('edit', existingParadasHtml(rowNum))
++ paradasSectionHtml('edit', existingParadasHtml(rowNum, row['Ordem de produção']))
 + FORM_FIELDS_FROM_OBS.map(field => fieldRowHtml(field, row[field] || '', 'dl_edit')).join('');
 renderParadasRows('edit');
 attachProdutoCascade(form, 'edit');
