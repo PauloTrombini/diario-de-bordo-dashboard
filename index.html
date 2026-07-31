@@ -406,31 +406,37 @@ const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
 const TAB_MAIN = 'Diario de Bordo';
 const GID_MAIN = '1700278622';
 
-// Aba de apoio criada pelo usuário direto no Google Sheets para permitir
-// VÁRIOS lançamentos de parada (início/fim + código do motivo) por registro
-// do Diario de Bordo — em vez de um único intervalo início/fim por linha.
-// Colunas reais (A→E): HORA INICIO, HORA FIM, CODIGO PARADA, LINHA_DIARIO,
-// DURACAO (MIN). LINHA_DIARIO e DURACAO (MIN) foram adicionadas pelo
-// dashboard (não existiam quando o usuário criou a aba) para permitir somar
-// as paradas de cada registro de volta no Diario de Bordo — ver
-// COMPUTED_FIELDS['Tempo de Parada (min)'] abaixo.
-// IMPORTANTE: em 2026-07-27 descobrimos que essas duas colunas tinham sido
-// gravadas por engano como UMA célula só em D1 (texto "LINHA_DIARIO<TAB>
-// DURACAO (MIN)"), com E1 vazio — isso fazia todo lookup por nome de coluna
-// (r['LINHA_DIARIO']) retornar undefined pra sempre, quebrando o botão "Ver
-// Paradas" mesmo com dados corretos nas células. Corrigido direto na
-// planilha (D1/E1 separados). Lição: sempre confirme via CSV cru (não só
-// visualmente na grade) que cada cabeçalho é uma célula própria.
-const TAB_PARADAS = 'PARADAS MAQ';
-const GID_PARADAS = '122577231';
-// 'Observacao' (coluna F) foi adicionada em 2026-07-28 para permitir digitar
-// uma observação livre em cada lançamento de parada (pedido do usuário) —
-// sempre no final, mesmo padrão de "novas colunas vão no final" já usado no
-// Diario de Bordo.
-const FIELDS_PARADAS = ['HORA INICIO', 'HORA FIM', 'CODIGO PARADA', 'LINHA_DIARIO', 'DURACAO (MIN)', 'Observacao'];
+// Aba ÚNICA de histórico de paradas — pedido do usuário em 2026-07-31:
+// "seria interessante gerar uma unica aba de historico de paradas... que
+// tenha todas as informações necessarias". Substitui as DUAS abas antigas
+// (PARADAS MAQ + a antiga "Histórico Paradas" derivada por fórmula, que
+// quebrava toda vez que uma linha era inserida em PARADAS MAQ — Sheets
+// reajustava as referências de célula e desalinhava o "espelho" linha-a-
+// linha). Agora cada lançamento é gravado JÁ RESOLVIDO (Data/Ordem de
+// Produção/Máquina/Operador copiados do registro-pai no momento da
+// gravação), sem nenhuma fórmula de cruzamento entre abas — imune a
+// inserções de linha em qualquer uma das abas.
+// Colunas reais (A→K): Data, Ordem de Produção, Máquina, Operador,
+// Hora Início, Hora Fim, Código Motivo, Motivo, Observação, Duração (min),
+// LINHA_DIARIO. As duas últimas são técnicas (não pedidas explicitamente
+// pelo usuário, mas necessárias: Duração pra somar no Diario de Bordo,
+// LINHA_DIARIO pra saber a qual registro cada parada pertence).
+// PARADAS MAQ foi mantida intocada (sem uso pelo dashboard a partir de
+// agora) até o usuário confirmar que pode ser excluída.
+const TAB_PARADAS = 'Histórico Paradas';
+const GID_PARADAS = '1763468548';
+const FIELDS_PARADAS = ['Data', 'Ordem de Produção', 'Máquina', 'Operador', 'Hora Início', 'Hora Fim', 'Código Motivo', 'Motivo', 'Observação', 'Duração (min)', 'LINHA_DIARIO'];
 const COMPUTED_FIELDS_PARADAS = {
-'DURACAO (MIN)': '=IFERROR((INDIRECT("B"&ROW())-INDIRECT("A"&ROW()))*1440;"")',
+// Hora Início/Fim agora são as colunas E/F (antes eram A/B) — fórmula
+// ajustada de acordo, mesmo padrão ROW()-relativo de antes (imune a
+// inserção de linhas, pois só olha a própria linha).
+'Duração (min)': '=IFERROR((INDIRECT("F"&ROW())-INDIRECT("E"&ROW()))*1440;"")',
 };
+// "12 - EMBALAGEM + ARMAZENAMENTO" (formato do dropdown) -> ["12", "EMBALAGEM + ARMAZENAMENTO"]
+function splitCodigoMotivo(s){
+const m = /^(\d+)\s*-\s*(.*)$/.exec(s || '');
+return m ? [m[1], m[2]] : ['', s || ''];
+}
 
 // Aba de apoio (lista de motivos de parada), também criada pelo usuário.
 // Colunas: CODIGO, CATEGORIA 1, CATEGORIA 2 (OBS), USO. O dropdown de
@@ -854,11 +860,11 @@ body: JSON.stringify({ values: [values] }),
 // Apaga o CONTEÚDO de uma linha (não a linha em si) — usado pelo botão de
 // excluir parada (pedido do usuário em 2026-07-31). Optamos por "limpar"
 // em vez de deletar a linha de verdade (deleteDimension) porque deletar
-// desloca todas as linhas abaixo, o que quebraria as fórmulas da aba
-// "Histórico Paradas" (que referenciam número de linha fixo de
-// 'PARADAS MAQ') e o _row já carregado na página. Limpar a linha faz o
-// registro sumir da lista (o filtro em existingParadasHtml exige
-// HORA INICIO preenchido) sem mexer em nenhuma outra linha.
+// desloca todas as linhas abaixo, o que desalinharia o _row já carregado
+// na página (e, em teoria, qualquer referência de linha fixa que exista
+// em outra aba). Limpar a linha faz o registro sumir da lista (o filtro
+// em existingParadasHtml exige "Hora Início" preenchido) sem mexer em
+// nenhuma outra linha.
 async function clearRow(tabName, rowNum, numCols){
 const lastCol = String.fromCharCode('A'.charCodeAt(0) + numCols - 1);
 await fetch(
@@ -1121,22 +1127,23 @@ return eff != null ? [`Eff: ${fmtNum(eff, 2)}%`] : ['Eff: — (meta não definid
 // =====================================================================
 let chartPareto = null;
 
-// Junta cada lançamento de PARADAS MAQ com o registro pai (via
-// LINHA_DIARIO -> _row) só pra pegar a Data dele — PARADAS MAQ não tem
-// coluna de Data própria — e então aplica o filtro de período dia/semana/
-// mês igual aos outros painéis, agrupando o total de minutos por Código
-// Parada e calculando o % acumulado (Pareto).
+// Cada lançamento da aba Histórico Paradas já vem com Data/Máquina
+// gravados diretamente (denormalizado no momento da criação — ver
+// buildRowValuesParadas), então não precisa mais buscar o registro pai
+// via LINHA_DIARIO só pra isso (como era necessário quando a fonte era
+// PARADAS MAQ, que não tinha Data própria). Aplica o filtro de período
+// dia/semana/mês igual aos outros painéis, agrupando o total de minutos
+// por Código Parada e calculando o % acumulado (Pareto).
 function aggregateParadasPareto(periodo, anchorStr, mesStr, codigoFiltro, linhaFiltro){
 const joined = RAW_PARADAS_ROWS
-.filter(p => p['HORA INICIO'])
+.filter(p => p['Hora Início'])
 .map(p => {
-const parentRow = Number(p['LINHA_DIARIO']);
-const parent = RAW_MAIN_ROWS.find(r => r._row === parentRow) || {};
+const codigoLabel = p['Código Motivo'] ? (p['Código Motivo'] + ' - ' + p['Motivo']) : (p['Motivo'] || '');
 return {
-Data: parent['Data'],
-linha: parent['Linha/Maquina'] || '',
-codigo: p['CODIGO PARADA'] || 'Não informado',
-duracao: num(p['DURACAO (MIN)']) || 0,
+Data: p['Data'],
+linha: p['Máquina'] || '',
+codigo: codigoLabel || 'Não informado',
+duracao: num(p['Duração (min)']) || 0,
 };
 })
 .filter(x => x.Data);
@@ -1571,36 +1578,56 @@ if (inicio && fim) entries.push({ inicio, fim, codigo, observacao });
 return entries;
 }
 // Monta o array de valores na ordem exata de FIELDS_PARADAS para um
-// lançamento de parada, vinculando-o à linha do Diario de Bordo.
-function buildRowValuesParadas(entry, linhaDiario){
+// lançamento de parada, vinculando-o à linha do Diario de Bordo e já
+// gravando Data/Ordem de Produção/Máquina/Operador (denormalizado, copiado
+// do registro-pai no momento da gravação — ver comentário acima de
+// TAB_PARADAS). `denorm` é {Data, 'Ordem de Produção', Máquina, Operador}.
+function buildRowValuesParadas(entry, linhaDiario, denorm){
+const [codigo, motivo] = splitCodigoMotivo(entry.codigo);
+const d = denorm || {};
 const dataByField = {
-'HORA INICIO': entry.inicio,
-'HORA FIM': entry.fim,
-'CODIGO PARADA': entry.codigo,
+'Data': d['Data'] || '',
+'Ordem de Produção': d['Ordem de Produção'] || '',
+'Máquina': d['Máquina'] || '',
+'Operador': d['Operador'] || '',
+'Hora Início': entry.inicio,
+'Hora Fim': entry.fim,
+'Código Motivo': codigo,
+'Motivo': motivo,
+'Observação': entry.observacao || '',
 'LINHA_DIARIO': linhaDiario,
-'Observacao': entry.observacao || '',
 };
 return FIELDS_PARADAS.map(f => (f in COMPUTED_FIELDS_PARADAS) ? COMPUTED_FIELDS_PARADAS[f] : (dataByField[f] ?? ''));
 }
-// Lista (read-only) das paradas já gravadas na aba PARADAS MAQ para uma
-// linha do Diario de Bordo, usada tanto no modal de edição quanto na
+// Constrói o objeto denorm a partir do dicionário de campos do formulário
+// (Diario de Bordo) pra passar pra buildRowValuesParadas.
+function denormFromFormData(data){
+return {
+'Data': data['Data'] || '',
+'Ordem de Produção': data['Ordem de produção'] || '',
+'Máquina': data['Linha/Maquina'] || '',
+'Operador': data['Operador'] || '',
+};
+}
+// Lista (read-only) das paradas já gravadas na aba Histórico Paradas para
+// uma linha do Diario de Bordo, usada tanto no modal de edição quanto na
 // consulta "Ver Paradas".
 function existingParadasHtml(rowNum){
-const linked = RAW_PARADAS_ROWS.filter(r => Number(r['LINHA_DIARIO']) === rowNum && r['HORA INICIO']);
+const linked = RAW_PARADAS_ROWS.filter(r => Number(r['LINHA_DIARIO']) === rowNum && r['Hora Início']);
 if (!linked.length){
 return '<div class="paradas-existing hint">Nenhuma parada lançada ainda para este registro.</div>';
 }
-const total = linked.reduce((s, r) => s + (num(r['DURACAO (MIN)']) || 0), 0);
+const total = linked.reduce((s, r) => s + (num(r['Duração (min)']) || 0), 0);
 // Botão "Editar" por parada só aparece em modo edição (mesmo critério já
 // usado pro botão "Editar" do registro inteiro) — criado a pedido do
 // usuário pra poder corrigir uma parada já lançada (horário/código/obs)
 // sem precisar apagar e relançar.
 const editable = !!accessToken;
 const rows = linked.map(r => `<div class="parada-row parada-row-readonly${editable ? ' editable' : ''}">
-<div>${r['HORA INICIO']} – ${r['HORA FIM']}</div>
-<div>${r['CODIGO PARADA'] || '—'}</div>
-<div>${fmtNum(num(r['DURACAO (MIN)']) || 0)} min</div>
-<div>${r['Observacao'] || '—'}</div>
+<div>${r['Hora Início']} – ${r['Hora Fim']}</div>
+<div>${r['Código Motivo'] ? (r['Código Motivo'] + ' - ' + r['Motivo']) : (r['Motivo'] || '—')}</div>
+<div>${fmtNum(num(r['Duração (min)']) || 0)} min</div>
+<div>${r['Observação'] || '—'}</div>
 ${editable ? `<button type="button" class="btn icon-btn" title="Editar esta parada" onclick="openEditParadaModal(${r._row}, ${rowNum})">✏️</button>` : ''}
 ${editable ? `<button type="button" class="btn icon-btn" title="Excluir esta parada" onclick="deleteParadaRow(${r._row}, ${rowNum})">🗑️</button>` : ''}
 </div>`).join('');
@@ -1619,17 +1646,17 @@ let _editParadaCtx = null; // { paradaRow, parentRow, origin: 'view' | 'edit' }
 function openEditParadaModal(paradaRow, parentRow){
 const rec = RAW_PARADAS_ROWS.find(r => r._row === paradaRow);
 if (!rec) return;
-document.getElementById('epInicio').value = rec['HORA INICIO'] || '';
-document.getElementById('epFim').value = rec['HORA FIM'] || '';
+document.getElementById('epInicio').value = rec['Hora Início'] || '';
+document.getElementById('epFim').value = rec['Hora Fim'] || '';
 const opts = CODIGO_PARADA_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
-const codigoAtual = rec['CODIGO PARADA'] || '';
+const codigoAtual = rec['Código Motivo'] ? (rec['Código Motivo'] + ' - ' + rec['Motivo']) : '';
 const selEl = document.getElementById('epCodigo');
 selEl.innerHTML = '<option value="">Selecione…</option>' + opts;
 if (codigoAtual && !CODIGO_PARADA_OPTIONS.includes(codigoAtual)){
 selEl.insertAdjacentHTML('beforeend', `<option value="${codigoAtual}">${codigoAtual}</option>`);
 }
 selEl.value = codigoAtual;
-document.getElementById('epObs').value = rec['Observacao'] || '';
+document.getElementById('epObs').value = rec['Observação'] || '';
 
 // origem: se o modal "Ver Paradas" estiver aberto, volta pra ele depois de
 // salvar; senão, assume que veio do modal de edição do registro.
@@ -1655,7 +1682,12 @@ const saveBtn = document.getElementById('editParadaSaveBtn');
 saveBtn.disabled = true;
 saveBtn.textContent = 'Salvando…';
 try {
-const values = buildRowValuesParadas({ inicio, fim, codigo, observacao }, parentRow);
+// Preserva Data/Ordem de Produção/Máquina/Operador já gravados nesta
+// linha (a edição só corrige horário/código/observação, não o vínculo
+// com o registro-pai).
+const rec = RAW_PARADAS_ROWS.find(r => r._row === paradaRow) || {};
+const denorm = { 'Data': rec['Data'], 'Ordem de Produção': rec['Ordem de Produção'], 'Máquina': rec['Máquina'], 'Operador': rec['Operador'] };
+const values = buildRowValuesParadas({ inicio, fim, codigo, observacao }, parentRow, denorm);
 await updateRow(TAB_PARADAS, paradaRow, values);
 showToast('Parada atualizada.', true);
 closeEditParadaModal();
@@ -1677,7 +1709,8 @@ saveBtn.textContent = 'Salvar';
 // recarrega os dados, reabrindo o mesmo modal de onde veio o clique.
 async function deleteParadaRow(paradaRow, parentRow){
 const rec = RAW_PARADAS_ROWS.find(r => r._row === paradaRow);
-const desc = rec ? `${rec['HORA INICIO']} – ${rec['HORA FIM']} (${rec['CODIGO PARADA'] || '—'})` : 'esta parada';
+const motivoLabel = rec['Código Motivo'] ? (rec['Código Motivo'] + ' - ' + rec['Motivo']) : (rec['Motivo'] || '—');
+const desc = rec ? `${rec['Hora Início']} – ${rec['Hora Fim']} (${motivoLabel})` : 'esta parada';
 if (!confirm(`Excluir o lançamento ${desc}? Essa ação não pode ser desfeita.`)) return;
 const origin = document.getElementById('viewParadasOverlay').classList.contains('open') ? 'view' : 'edit';
 try {
@@ -1735,8 +1768,9 @@ const paradaEntries = collectParadaEntries('new');
 try {
 const targetRow = nextEmptyRow();
 await updateRow(TAB_MAIN, targetRow, buildRowValues(data));
+const denorm = denormFromFormData(data);
 for (const p of paradaEntries){
-await appendRow(GID_PARADAS, TAB_PARADAS, buildRowValuesParadas(p, targetRow));
+await appendRow(GID_PARADAS, TAB_PARADAS, buildRowValuesParadas(p, targetRow, denorm));
 }
 showToast('Registro criado.' + (paradaEntries.length ? ` ${paradaEntries.length} parada(s) registrada(s).` : ''), true);
 closeNewRecordModal();
@@ -1777,8 +1811,9 @@ await ensureListValue(field, data[field]);
 const paradaEntries = collectParadaEntries('edit');
 try {
 await updateRow(TAB_MAIN, rowNum, buildRowValues(data));
+const denorm = denormFromFormData(data);
 for (const p of paradaEntries){
-await appendRow(GID_PARADAS, TAB_PARADAS, buildRowValuesParadas(p, rowNum));
+await appendRow(GID_PARADAS, TAB_PARADAS, buildRowValuesParadas(p, rowNum, denorm));
 }
 showToast('Registro atualizado.' + (paradaEntries.length ? ` ${paradaEntries.length} parada(s) registrada(s).` : ''), true);
 closeEditModal();
