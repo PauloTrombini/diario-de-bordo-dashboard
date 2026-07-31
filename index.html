@@ -208,21 +208,16 @@ main{ padding:14px 12px 40px; }
 .right-controls .btn{ flex:1 1 auto; text-align:center; }
 }
 
-/* Layout tipo "app de tela cheia" pra desktop — pedido do usuário em
-   2026-07-31: o dashboard ocupa exatamente a altura da tela do computador
-   (o header fica sempre visível, fixo no topo) e quem rola é a área de
-   conteúdo (main), não a página/documento inteiro. Cada tabela continua
-   com a própria rolagem interna (.table-scroll, já existente) conforme for
-   lançando mais linhas nos relatórios. Só entra em vigor acima de 640px de
-   largura pra não alterar o layout de smartphone (ajustado numa tarefa
-   anterior, que já rola a página normalmente — combina melhor com telas
-   pequenas do que um app de tela cheia). */
-@media (min-width:641px){
-html, body{ height:100%; }
-body{ display:flex; flex-direction:column; overflow:hidden; }
-header{ flex:0 0 auto; }
-main{ flex:1 1 auto; overflow-y:auto; min-height:0; }
-}
+/* Painel "Detalhe Diário de Bordo": maior altura possível (baseada na
+   altura da tela), com rolagem vertical própria — pedido do usuário em
+   2026-07-31, pois essa tabela vai ter 200+ linhas. A tentativa anterior de
+   deixar o DASHBOARD INTEIRO do tamanho da tela (header fixo + rolagem só
+   no main) foi desfeita a pedido do usuário; o ajuste correto era só nesta
+   tabela específica, então a página voltou a rolar normalmente (padrão de
+   antes) e só o painel abaixo ficou maior/com rolagem própria.
+   #detalheScroll é o wrapper .table-scroll do painel "Detalhe Diário de
+   Bordo" (ver HTML) — id novo, não usado por nenhuma outra tabela. */
+#detalheScroll{ max-height:80vh; }
 </style>
 </head>
 <body>
@@ -262,7 +257,7 @@ main{ flex:1 1 auto; overflow-y:auto; min-height:0; }
 
 <div class="panel panel-light">
 <h2>Detalhe Diário de Bordo</h2>
-<div class="table-scroll">
+<div class="table-scroll" id="detalheScroll">
 <table id="tblDetalhe">
 <thead>
 <tr id="tblDetalheHeadRow"></tr>
