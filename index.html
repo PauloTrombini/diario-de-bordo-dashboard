@@ -173,6 +173,12 @@ border-radius:6px; padding:7px 8px; font-size:13px; font-family:inherit;
 .parada-row-readonly{
 grid-template-columns:1fr 1fr 1fr 1.6fr; background:transparent; align-items:center; font-size:13px;
 }
+/* Quando em modo edição, cada parada já lançada ganha um botão "Editar" —
+   coluna extra (auto) só nesse caso, pra não mexer no layout de quem está
+   só consultando (Ver Paradas fora do modo edição). */
+.parada-row-readonly.editable{
+grid-template-columns:1fr 1fr 1fr 1.6fr auto;
+}
 .paradas-total{ font-size:13px; color:var(--txt2); margin:6px 0 14px; }
 .paradas-total strong{ color:var(--txt); }
 .paradas-existing{ margin-bottom:14px; }
@@ -200,40 +206,6 @@ header{ padding:14px 16px; }
 main{ padding:14px 12px 40px; }
 .kpis{ grid-template-columns:repeat(2, 1fr); gap:10px; }
 .right-controls .btn{ flex:1 1 auto; text-align:center; }
-
-/* Ajustes extras de smartphone (mesmo arquivo/URL da versão desktop —
-   essas regras só entram em vigor abaixo de 640px de largura de tela,
-   então o layout "denso" de desktop continua intacto acima disso). */
-
-/* Alvos de toque maiores nos filtros, campos do modal e botões — o padrão
-   de desktop (padding ~8-9px) fica pequeno demais pra tocar com o dedo. */
-.filters select, .filters input,
-.field-row input, .field-row select, .field-row textarea,
-.parada-row input, .parada-row select{ min-height:44px; }
-.btn:not(.icon-btn){ min-height:44px; }
-.icon-btn{ padding:9px 11px; font-size:15px; }
-
-/* Filtros empilhados e ocupando a largura toda (em vez de caixas estreitas
-   soltas no meio da tela). */
-.filters{ flex-direction:column; align-items:stretch; }
-.filters select, .filters input{ width:100%; min-width:0; }
-.filters .filter-label{ margin-right:0; margin-top:4px; }
-
-/* Primeira coluna das tabelas fixa (sticky) durante o scroll horizontal,
-   pra sempre saber a que linha/data aquele valor se refere ao arrastar a
-   tabela pro lado com o dedo. */
-.table-scroll table th:first-child, .table-scroll table td:first-child{
-position:sticky; left:0; z-index:1; background:var(--panel);
-}
-.panel-light .table-scroll table th:first-child{ background:#f4f6fa; }
-.panel-light .table-scroll table td:first-child{ background:#f4f6fa; }
-.panel-light .table-scroll tr.eff-good td:first-child{ background:#d7f5e6; }
-.panel-light .table-scroll tr.eff-warn td:first-child{ background:#fef0cf; }
-.panel-light .table-scroll tr.eff-bad td:first-child{ background:#fbdbd9; }
-
-/* Gráficos mais baixos pra não exigir tanto scroll vertical numa tela pequena. */
-.chart-canvas-wrap{ height:260px; }
-.panel.chart-panel-fullscreen .chart-canvas-wrap{ height:calc(100vh - 160px); }
 }
 </style>
 </head>
@@ -404,6 +376,25 @@ position:sticky; left:0; z-index:1; background:var(--panel);
 <div id="viewParadasBody" style="overflow:auto; flex:1;"></div>
 <div class="modal-actions">
 <button type="button" class="btn" onclick="closeParadasViewModal()">Fechar</button>
+</div>
+</div>
+</div>
+
+<!-- Editar uma parada já lançada (corrigir horário/código/observação sem
+     precisar apagar e relançar) — criado a pedido do usuário em 2026-07-31. -->
+<div class="overlay" id="editParadaOverlay">
+<div class="modal" style="max-width:480px;">
+<h3>Editar Parada</h3>
+<div class="modal-sub">Corrige este lançamento direto na aba "PARADAS MAQ".</div>
+<form id="editParadaForm">
+<div class="field-row"><label>Início</label><input type="time" id="epInicio"></div>
+<div class="field-row"><label>Fim</label><input type="time" id="epFim"></div>
+<div class="field-row"><label>Código Parada</label><select id="epCodigo"></select></div>
+<div class="field-row"><label>Observação</label><input type="text" id="epObs" placeholder="Observação (opcional)"></div>
+</form>
+<div class="modal-actions">
+<button type="button" class="btn" onclick="closeEditParadaModal()">Cancelar</button>
+<button type="button" class="btn btn-primary" id="editParadaSaveBtn" onclick="submitEditParada()">Salvar</button>
 </div>
 </div>
 </div>
@@ -1627,13 +1618,83 @@ if (!linked.length){
 return '<div class="paradas-existing hint">Nenhuma parada lançada ainda para este registro.</div>';
 }
 const total = linked.reduce((s, r) => s + (num(r['DURACAO (MIN)']) || 0), 0);
-const rows = linked.map(r => `<div class="parada-row parada-row-readonly">
+// Botão "Editar" por parada só aparece em modo edição (mesmo critério já
+// usado pro botão "Editar" do registro inteiro) — criado a pedido do
+// usuário pra poder corrigir uma parada já lançada (horário/código/obs)
+// sem precisar apagar e relançar.
+const editable = !!accessToken;
+const rows = linked.map(r => `<div class="parada-row parada-row-readonly${editable ? ' editable' : ''}">
 <div>${r['HORA INICIO']} – ${r['HORA FIM']}</div>
 <div>${r['CODIGO PARADA'] || '—'}</div>
 <div>${fmtNum(num(r['DURACAO (MIN)']) || 0)} min</div>
 <div>${r['Observacao'] || '—'}</div>
+${editable ? `<button type="button" class="btn icon-btn" title="Editar esta parada" onclick="openEditParadaModal(${r._row}, ${rowNum})">✏️</button>` : ''}
 </div>`).join('');
 return `<div class="paradas-existing">${rows}<div class="paradas-total">Já lançado: <strong>${fmtNum(total)} min</strong></div></div>`;
+}
+
+// =====================================================================
+// Modal: editar uma parada JÁ LANÇADA (corrigir horário/código/observação)
+// — pedido do usuário em 2026-07-31. Reaproveita updateRow() (já usado pro
+// registro principal) pra gravar só essa linha da aba PARADAS MAQ, sem
+// mexer no fluxo de "+ Adicionar parada" (que continua criando linhas
+// novas via appendRow, inalterado).
+// =====================================================================
+let _editParadaCtx = null; // { paradaRow, parentRow, origin: 'view' | 'edit' }
+
+function openEditParadaModal(paradaRow, parentRow){
+const rec = RAW_PARADAS_ROWS.find(r => r._row === paradaRow);
+if (!rec) return;
+document.getElementById('epInicio').value = rec['HORA INICIO'] || '';
+document.getElementById('epFim').value = rec['HORA FIM'] || '';
+const opts = CODIGO_PARADA_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
+const codigoAtual = rec['CODIGO PARADA'] || '';
+const selEl = document.getElementById('epCodigo');
+selEl.innerHTML = '<option value="">Selecione…</option>' + opts;
+if (codigoAtual && !CODIGO_PARADA_OPTIONS.includes(codigoAtual)){
+selEl.insertAdjacentHTML('beforeend', `<option value="${codigoAtual}">${codigoAtual}</option>`);
+}
+selEl.value = codigoAtual;
+document.getElementById('epObs').value = rec['Observacao'] || '';
+
+// origem: se o modal "Ver Paradas" estiver aberto, volta pra ele depois de
+// salvar; senão, assume que veio do modal de edição do registro.
+const origin = document.getElementById('viewParadasOverlay').classList.contains('open') ? 'view' : 'edit';
+_editParadaCtx = { paradaRow, parentRow, origin };
+document.getElementById('editParadaOverlay').classList.add('open');
+}
+function closeEditParadaModal(){
+document.getElementById('editParadaOverlay').classList.remove('open');
+}
+async function submitEditParada(){
+if (!_editParadaCtx) return;
+const { paradaRow, parentRow, origin } = _editParadaCtx;
+const inicio = document.getElementById('epInicio').value;
+const fim = document.getElementById('epFim').value;
+const codigo = document.getElementById('epCodigo').value;
+const observacao = document.getElementById('epObs').value.trim();
+if (!inicio || !fim){
+showToast('Preencha início e fim da parada.', false);
+return;
+}
+const saveBtn = document.getElementById('editParadaSaveBtn');
+saveBtn.disabled = true;
+saveBtn.textContent = 'Salvando…';
+try {
+const values = buildRowValuesParadas({ inicio, fim, codigo, observacao }, parentRow);
+await updateRow(TAB_PARADAS, paradaRow, values);
+showToast('Parada atualizada.', true);
+closeEditParadaModal();
+await refresh();
+// Reabre o modal de onde veio a edição, já com o dado corrigido.
+if (origin === 'view') openParadasViewModal(parentRow);
+else openEditModal(parentRow);
+} catch (e) {
+showToast('Erro ao salvar parada: ' + e.message, false);
+} finally {
+saveBtn.disabled = false;
+saveBtn.textContent = 'Salvar';
+}
 }
 
 // =====================================================================
