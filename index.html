@@ -207,6 +207,22 @@ main{ padding:14px 12px 40px; }
 .kpis{ grid-template-columns:repeat(2, 1fr); gap:10px; }
 .right-controls .btn{ flex:1 1 auto; text-align:center; }
 }
+
+/* Layout tipo "app de tela cheia" pra desktop — pedido do usuário em
+   2026-07-31: o dashboard ocupa exatamente a altura da tela do computador
+   (o header fica sempre visível, fixo no topo) e quem rola é a área de
+   conteúdo (main), não a página/documento inteiro. Cada tabela continua
+   com a própria rolagem interna (.table-scroll, já existente) conforme for
+   lançando mais linhas nos relatórios. Só entra em vigor acima de 640px de
+   largura pra não alterar o layout de smartphone (ajustado numa tarefa
+   anterior, que já rola a página normalmente — combina melhor com telas
+   pequenas do que um app de tela cheia). */
+@media (min-width:641px){
+html, body{ height:100%; }
+body{ display:flex; flex-direction:column; overflow:hidden; }
+header{ flex:0 0 auto; }
+main{ flex:1 1 auto; overflow-y:auto; min-height:0; }
+}
 </style>
 </head>
 <body>
