@@ -282,25 +282,6 @@ main{ padding:14px 12px 40px; }
 </div>
 </div>
 
-<div class="panel">
-<h2>Histórico de Paradas</h2>
-<div class="filters">
-<select id="fHistLinha" onchange="renderParadasHistorico()"><option value="">Linha/Máquina: todas</option></select>
-<select id="fHistOrdem" onchange="renderParadasHistorico()"><option value="">Ordem de Produção: todas</option></select>
-</div>
-<div class="table-scroll">
-<table id="tblHistorico">
-<thead>
-<tr>
-<th>Data</th><th>Linha/Máquina</th><th>Ordem de Produção</th><th>Operador</th>
-<th>Início</th><th>Fim</th><th>Código Parada</th><th>Duração (min)</th>
-</tr>
-</thead>
-<tbody></tbody>
-</table>
-</div>
-</div>
-
 <div class="panel" id="panelChartProducaoMeta">
 <div class="chart-panel-head">
 <h2>Produção x Meta por Máquina</h2>
@@ -912,8 +893,6 @@ if (values.includes(current)) el.value = current;
 sel('fLinha', [...new Set(ALL_ROWS.map(r => r['Linha/Maquina']).filter(Boolean))].sort());
 sel('fOperador', [...new Set(ALL_ROWS.map(r => r['Operador']).filter(Boolean))].sort());
 sel('fOrdemProducao', [...new Set(ALL_ROWS.map(r => r['Ordem de produção']).filter(Boolean))].sort());
-sel('fHistLinha', [...new Set(ALL_ROWS.map(r => r['Linha/Maquina']).filter(Boolean))].sort());
-sel('fHistOrdem', [...new Set(ALL_ROWS.map(r => r['Ordem de produção']).filter(Boolean))].sort());
 // Filtro por Status (coluna P) no dashboard TPM.
 sel('fTpmStatus', [...new Set(OPTION_STORE['Status'] || [])]);
 // Filtros do Pareto de Paradas: código de parada (lista de motivos
@@ -970,7 +949,6 @@ function renderAll(){
 const filtered = applyFilters(ALL_ROWS);
 renderKPIs(filtered);
 renderTable(filtered);
-renderParadasHistorico();
 renderProducaoMetaChart();
 renderTpmTable();
 renderParetoChart();
@@ -1365,48 +1343,11 @@ filtered = filtered.filter(r => normalizeSheetDateBR(r['Data de concluão']) ===
 renderColumnsTable(filtered, COLUMNS_TPM, 'tblTpmHeadRow', 'tblTpm', editing, false);
 }
 
-// =====================================================================
-// Histórico de Paradas — por Linha/Máquina e por Ordem de Produção
-// =====================================================================
-// Junta cada lançamento da aba PARADAS MAQ com o registro do Diario de
-// Bordo ao qual ele pertence (via LINHA_DIARIO -> _row), pra poder mostrar
-// e filtrar o histórico de paradas por máquina e por ordem de produção,
-// não só registro-a-registro como o botão "Ver Paradas" faz.
-function renderParadasHistorico(){
-const tbody = document.querySelector('#tblHistorico tbody');
-if (!tbody) return;
-const fLinha = document.getElementById('fHistLinha').value;
-const fOrdem = document.getElementById('fHistOrdem').value;
-
-const linked = RAW_PARADAS_ROWS
-.filter(p => p['HORA INICIO'])
-.map(p => {
-const parentRow = Number(p['LINHA_DIARIO']);
-const parent = RAW_MAIN_ROWS.find(r => r._row === parentRow) || {};
-return { p, parent };
-})
-.filter(({parent}) => parent['Data']) // ignora paradas orfãs (linha vinculada não existe mais)
-.filter(({parent}) => !fLinha || parent['Linha/Maquina'] === fLinha)
-.filter(({parent}) => !fOrdem || parent['Ordem de produção'] === fOrdem)
-.sort((a, b) => (b.parent._row || 0) - (a.parent._row || 0));
-
-if (!linked.length){
-tbody.innerHTML = `<tr><td colspan="8" class="empty">Nenhuma parada encontrada para o filtro selecionado.</td></tr>`;
-return;
-}
-tbody.innerHTML = linked.map(({p, parent}) => `
-<tr>
-<td>${parent['Data'] || '—'}</td>
-<td>${parent['Linha/Maquina'] || '—'}</td>
-<td>${parent['Ordem de produção'] || '—'}</td>
-<td>${parent['Operador'] || '—'}</td>
-<td>${p['HORA INICIO'] || '—'}</td>
-<td>${p['HORA FIM'] || '—'}</td>
-<td>${p['CODIGO PARADA'] || '—'}</td>
-<td>${fmtNum(num(p['DURACAO (MIN)']) || 0)}</td>
-</tr>
-`).join('');
-}
+// Histórico de Paradas: removido do dashboard a pedido do usuário em
+// 2026-07-31 — esse relacionamento (PARADAS MAQ + Diario de Bordo) agora
+// vive só na aba "Histórico Paradas" do Google Sheets, criada nessa mesma
+// data. RAW_PARADAS_ROWS continua em uso pelo botão "Ver Paradas"/edição
+// de parada individual (existingParadasHtml), então não foi removido.
 
 // =====================================================================
 // Campo de formulário (dropdown / textarea / input tipado)
