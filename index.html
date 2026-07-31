@@ -173,11 +173,11 @@ border-radius:6px; padding:7px 8px; font-size:13px; font-family:inherit;
 .parada-row-readonly{
 grid-template-columns:1fr 1fr 1fr 1.6fr; background:transparent; align-items:center; font-size:13px;
 }
-/* Quando em modo edição, cada parada já lançada ganha um botão "Editar" —
-   coluna extra (auto) só nesse caso, pra não mexer no layout de quem está
-   só consultando (Ver Paradas fora do modo edição). */
+/* Quando em modo edição, cada parada já lançada ganha os botões "Editar" e
+   "Excluir" — duas colunas extra (auto) só nesse caso, pra não mexer no
+   layout de quem está só consultando (Ver Paradas fora do modo edição). */
 .parada-row-readonly.editable{
-grid-template-columns:1fr 1fr 1fr 1.6fr auto;
+grid-template-columns:1fr 1fr 1fr 1.6fr auto auto;
 }
 .paradas-total{ font-size:13px; color:var(--txt2); margin:6px 0 14px; }
 .paradas-total strong{ color:var(--txt); }
@@ -208,16 +208,18 @@ main{ padding:14px 12px 40px; }
 .right-controls .btn{ flex:1 1 auto; text-align:center; }
 }
 
-/* Painel "Detalhe Diário de Bordo": maior altura possível (baseada na
-   altura da tela), com rolagem vertical própria — pedido do usuário em
-   2026-07-31, pois essa tabela vai ter 200+ linhas. A tentativa anterior de
-   deixar o DASHBOARD INTEIRO do tamanho da tela (header fixo + rolagem só
-   no main) foi desfeita a pedido do usuário; o ajuste correto era só nesta
-   tabela específica, então a página voltou a rolar normalmente (padrão de
-   antes) e só o painel abaixo ficou maior/com rolagem própria.
+/* Painel "Detalhe Diário de Bordo": altura FIXA igual a 80% da altura da
+   tela (não apenas um limite máximo) — pedido do usuário em 2026-07-31.
+   Com "height" fixo (em vez de só "max-height"), a caixa sempre ocupa
+   esse comprimento na tela, mesmo com poucas linhas; a rolagem vertical
+   interna passa a existir assim que as 200+ linhas reais forem
+   preenchidas. A tentativa anterior de deixar o DASHBOARD INTEIRO do
+   tamanho da tela (header fixo + rolagem só no main) foi desfeita a
+   pedido do usuário; o ajuste correto era só nesta tabela específica, e a
+   página continua rolando normalmente (padrão de antes).
    #detalheScroll é o wrapper .table-scroll do painel "Detalhe Diário de
    Bordo" (ver HTML) — id novo, não usado por nenhuma outra tabela. */
-#detalheScroll{ max-height:80vh; }
+#detalheScroll{ height:80vh; max-height:80vh; }
 </style>
 </head>
 <body>
@@ -845,6 +847,25 @@ await fetch(
 method: 'PUT',
 headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
 body: JSON.stringify({ values: [values] }),
+}
+);
+}
+
+// Apaga o CONTEÚDO de uma linha (não a linha em si) — usado pelo botão de
+// excluir parada (pedido do usuário em 2026-07-31). Optamos por "limpar"
+// em vez de deletar a linha de verdade (deleteDimension) porque deletar
+// desloca todas as linhas abaixo, o que quebraria as fórmulas da aba
+// "Histórico Paradas" (que referenciam número de linha fixo de
+// 'PARADAS MAQ') e o _row já carregado na página. Limpar a linha faz o
+// registro sumir da lista (o filtro em existingParadasHtml exige
+// HORA INICIO preenchido) sem mexer em nenhuma outra linha.
+async function clearRow(tabName, rowNum, numCols){
+const lastCol = String.fromCharCode('A'.charCodeAt(0) + numCols - 1);
+await fetch(
+`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!A${rowNum}:${lastCol}${rowNum}:clear`,
+{
+method: 'POST',
+headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
 }
 );
 }
@@ -1581,6 +1602,7 @@ const rows = linked.map(r => `<div class="parada-row parada-row-readonly${editab
 <div>${fmtNum(num(r['DURACAO (MIN)']) || 0)} min</div>
 <div>${r['Observacao'] || '—'}</div>
 ${editable ? `<button type="button" class="btn icon-btn" title="Editar esta parada" onclick="openEditParadaModal(${r._row}, ${rowNum})">✏️</button>` : ''}
+${editable ? `<button type="button" class="btn icon-btn" title="Excluir esta parada" onclick="deleteParadaRow(${r._row}, ${rowNum})">🗑️</button>` : ''}
 </div>`).join('');
 return `<div class="paradas-existing">${rows}<div class="paradas-total">Já lançado: <strong>${fmtNum(total)} min</strong></div></div>`;
 }
@@ -1646,6 +1668,26 @@ showToast('Erro ao salvar parada: ' + e.message, false);
 } finally {
 saveBtn.disabled = false;
 saveBtn.textContent = 'Salvar';
+}
+}
+
+// Exclui um lançamento de parada já salvo — pedido do usuário em
+// 2026-07-31. Pede confirmação, limpa a linha correspondente na aba
+// 'PARADAS MAQ' (ver clearRow, acima — não desloca outras linhas) e
+// recarrega os dados, reabrindo o mesmo modal de onde veio o clique.
+async function deleteParadaRow(paradaRow, parentRow){
+const rec = RAW_PARADAS_ROWS.find(r => r._row === paradaRow);
+const desc = rec ? `${rec['HORA INICIO']} – ${rec['HORA FIM']} (${rec['CODIGO PARADA'] || '—'})` : 'esta parada';
+if (!confirm(`Excluir o lançamento ${desc}? Essa ação não pode ser desfeita.`)) return;
+const origin = document.getElementById('viewParadasOverlay').classList.contains('open') ? 'view' : 'edit';
+try {
+await clearRow(TAB_PARADAS, paradaRow, FIELDS_PARADAS.length);
+showToast('Parada excluída.', true);
+await refresh();
+if (origin === 'view') openParadasViewModal(parentRow);
+else openEditModal(parentRow);
+} catch (e) {
+showToast('Erro ao excluir parada: ' + e.message, false);
 }
 }
 
