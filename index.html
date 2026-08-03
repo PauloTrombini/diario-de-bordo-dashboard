@@ -890,9 +890,23 @@ catch (e) { detalhe = await res.text().catch(() => ''); }
 throw new Error(`${contexto} (HTTP ${res.status})${detalhe ? ': ' + detalhe : ''}`);
 }
 
+// IMPORTANTE (bug corrigido em 2026-08-03, 2ª causa raiz do dia): esta
+// função usava `${tabName}:append` — ou seja, o range enviado pra API era
+// só o NOME da aba, sem limitar colunas. Sem um range A1 explícito, a API
+// do Sheets tenta "detectar a tabela" sozinha (procurando o bloco de dados
+// existente na aba inteira, que tem dezenas de colunas herdadas do design
+// antigo, mesmo vazias). Isso fazia cada nova parada ser inserida cada vez
+// mais deslocada pra direita (uma gravação caiu na coluna J, a seguinte na
+// coluna S, etc.) — os dados nunca ficavam nas colunas A:K esperadas, por
+// isso nunca apareciam em "Ver Paradas" nem entravam no total de
+// Tempo de Parada (que lê especificamente a coluna J). Corrigido fixando o
+// range explícito `!A:${lastCol}` (calculado a partir de quantos valores
+// estamos gravando), o que ancora a tabela nas colunas certas e faz o
+// append sempre cair na coluna A da próxima linha livre.
 async function appendRow(gid, tabName, values){
+const lastCol = String.fromCharCode('A'.charCodeAt(0) + values.length - 1);
 const res = await fetch(
-`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}:append?valueInputOption=USER_ENTERED`,
+`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!A:${lastCol}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
 {
 method: 'POST',
 headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
