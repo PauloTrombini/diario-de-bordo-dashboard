@@ -554,11 +554,18 @@ const COMPUTED_FIELDS = {
 // linha 5 antiga — um teste — foi apagada, mas suas paradas continuaram
 // com LINHA_DIARIO=6). Ordem de Produção é um valor de negócio estável
 // (não se move quando linhas são inseridas/excluídas), então é uma chave
-// de vínculo muito mais robusta. Esta constante é reaplicada TODA VEZ que
-// um registro é criado/editado (buildRowValues), então precisa ficar em
-// sincronia com TAB_PARADAS ou o total volta a zerar no próximo
-// salvamento.
-'Tempo de Parada (min)': `=IFERROR(SUMIF('Histórico Paradas'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Paradas'!$J:$J);0)`,
+// de vínculo muito mais robusta.
+// Atualizado em 2026-08-03 (3ª correção): passou de SUMIF (só Ordem de
+// Produção) para SUMIFS (Ordem de Produção + Data) depois que a mesma
+// Ordem de Produção acabou sendo reaproveitada em dois registros de dias
+// diferentes (6190 em 30/07 e de novo em 31/07) — com um único critério,
+// o total de um registro somava as paradas do OUTRO registro que
+// compartilha o mesmo número de ordem. Data+Ordem juntos identificam o
+// registro de forma única na prática (o mesmo par não se repete no mesmo
+// dia). Esta constante é reaplicada TODA VEZ que um registro é
+// criado/editado (buildRowValues), então precisa ficar em sincronia com
+// TAB_PARADAS ou o total volta a zerar no próximo salvamento.
+'Tempo de Parada (min)': `=IFERROR(SUMIFS('Histórico Paradas'!$J:$J;'Histórico Paradas'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Paradas'!$A:$A;INDIRECT("${columnLetter('Data')}"&ROW()));0)`,
 // META vem da aba "Metas" (Linha/Maquina -> Meta, coluna F/6ª da aba
 // Metas), por VLOOKUP na Linha/Maquina desta mesma linha — fórmula mantida
 // idêntica à que já existia na planilha (confirmada em 2026-07-28), só
@@ -1638,13 +1645,19 @@ return {
 // Lista (read-only) das paradas já gravadas na aba Histórico Paradas para
 // uma linha do Diario de Bordo, usada tanto no modal de edição quanto na
 // consulta "Ver Paradas".
-// Vínculo por "Ordem de Produção" (não mais por LINHA_DIARIO/número de
-// linha — ver comentário em COMPUTED_FIELDS acima) — por isso recebe
-// ordemProducao do registro-pai, além do rowNum (que continua sendo
-// usado só pra reabrir o modal certo depois de editar/excluir uma parada).
-function existingParadasHtml(rowNum, ordemProducao){
-const linked = ordemProducao
-? RAW_PARADAS_ROWS.filter(r => r['Ordem de Produção'] === ordemProducao && r['Hora Início'])
+// Vínculo por "Ordem de Produção" + "Data" (não mais só por LINHA_DIARIO/
+// número de linha — ver comentário em COMPUTED_FIELDS acima). Só Ordem de
+// Produção não é suficiente: o mesmo número de ordem pode aparecer em mais
+// de um registro do Diario de Bordo (ex.: a mesma ordem retomada num dia
+// seguinte) — nesse caso "Ver Paradas" trazia as paradas do OUTRO registro
+// que compartilha o número, misturando os dois. Ordem+Data juntos
+// identificam o registro corretamente (o mesmo par não se repete no
+// mesmo dia) — por isso recebe ordemProducao E dataRegistro do
+// registro-pai, além do rowNum (que continua sendo usado só pra reabrir
+// o modal certo depois de editar/excluir uma parada).
+function existingParadasHtml(rowNum, ordemProducao, dataRegistro){
+const linked = (ordemProducao && dataRegistro)
+? RAW_PARADAS_ROWS.filter(r => r['Ordem de Produção'] === ordemProducao && r['Data'] === dataRegistro && r['Hora Início'])
 : [];
 if (!linked.length){
 return '<div class="paradas-existing hint">Nenhuma parada lançada ainda para este registro.</div>';
@@ -1765,7 +1778,7 @@ const sub = row
 ? `${row['Data'] || ''} · ${row['Ordem de produção'] || ''} · ${row['Linha/Maquina'] || ''} · ${row['Operador'] || ''}`
 : '';
 document.getElementById('viewParadasSub').textContent = sub;
-document.getElementById('viewParadasBody').innerHTML = existingParadasHtml(rowNum, row ? row['Ordem de produção'] : '');
+document.getElementById('viewParadasBody').innerHTML = existingParadasHtml(rowNum, row ? row['Ordem de produção'] : '', row ? row['Data'] : '');
 document.getElementById('viewParadasOverlay').classList.add('open');
 }
 function closeParadasViewModal(){
@@ -1824,7 +1837,7 @@ paradaRowIds.edit = [];
 form.innerHTML = FORM_FIELDS_BEFORE_OBS.map(field =>
 field === 'Produto' ? produtoFieldRowHtml('edit', row['Linha/Maquina'] || '', row['Produto'] || '') : fieldRowHtml(field, row[field] || '', 'dl_edit')
 ).join('')
-+ paradasSectionHtml('edit', existingParadasHtml(rowNum, row['Ordem de produção']))
++ paradasSectionHtml('edit', existingParadasHtml(rowNum, row['Ordem de produção'], row['Data']))
 + FORM_FIELDS_FROM_OBS.map(field => fieldRowHtml(field, row[field] || '', 'dl_edit')).join('');
 renderParadasRows('edit');
 attachProdutoCascade(form, 'edit');
