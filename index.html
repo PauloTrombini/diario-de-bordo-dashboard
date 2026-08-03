@@ -867,8 +867,31 @@ while (occupied.has(row)) row++;
 return row;
 }
 
+// IMPORTANTE (bug corrigido em 2026-08-03): estas três funções faziam só
+// "await fetch(...)" sem checar se a resposta veio com erro. A API do
+// Sheets NÃO lança exceção de rede quando rejeita a requisição (token
+// expirado, valor inválido, etc.) — ela responde normalmente com um HTTP
+// 4xx/5xx, e o fetch() do navegador considera isso uma resposta "bem
+// sucedida" (só rejeita a Promise em erro de rede/conexão). Sem checar
+// response.ok, um erro da API passava batido: o try/catch de quem chama
+// (submitEdit, submitNewRecord, ...) nunca via a exceção, e o toast de
+// "Registro atualizado / parada registrada" aparecia mesmo quando a
+// gravação daquela parada especificamente tinha falhado. Foi exatamente
+// o sintoma relatado: adicionar parada num registro em edição não
+// aparecia na planilha nem no "Ver Paradas", sem nenhum erro visível.
+// Agora cada função lê o corpo da resposta e lança um Error com a
+// mensagem real da API quando response.ok é falso, pra aparecer no toast
+// de erro (showToast) em vez de falhar em silêncio.
+async function checkSheetsResponse(res, contexto){
+if (res.ok) return res;
+let detalhe = '';
+try { const body = await res.json(); detalhe = body?.error?.message || JSON.stringify(body); }
+catch (e) { detalhe = await res.text().catch(() => ''); }
+throw new Error(`${contexto} (HTTP ${res.status})${detalhe ? ': ' + detalhe : ''}`);
+}
+
 async function appendRow(gid, tabName, values){
-await fetch(
+const res = await fetch(
 `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}:append?valueInputOption=USER_ENTERED`,
 {
 method: 'POST',
@@ -876,11 +899,12 @@ headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/
 body: JSON.stringify({ values: [values] }),
 }
 );
+await checkSheetsResponse(res, `Falha ao adicionar linha em "${tabName}"`);
 }
 
 async function updateRow(tabName, rowNum, values){
 const lastCol = String.fromCharCode('A'.charCodeAt(0) + values.length - 1);
-await fetch(
+const res = await fetch(
 `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!A${rowNum}:${lastCol}${rowNum}?valueInputOption=USER_ENTERED`,
 {
 method: 'PUT',
@@ -888,6 +912,7 @@ headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/
 body: JSON.stringify({ values: [values] }),
 }
 );
+await checkSheetsResponse(res, `Falha ao atualizar linha ${rowNum} em "${tabName}"`);
 }
 
 // Apaga o CONTEÚDO de uma linha (não a linha em si) — usado pelo botão de
@@ -900,13 +925,14 @@ body: JSON.stringify({ values: [values] }),
 // nenhuma outra linha.
 async function clearRow(tabName, rowNum, numCols){
 const lastCol = String.fromCharCode('A'.charCodeAt(0) + numCols - 1);
-await fetch(
+const res = await fetch(
 `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tabName)}!A${rowNum}:${lastCol}${rowNum}:clear`,
 {
 method: 'POST',
 headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
 }
 );
+await checkSheetsResponse(res, `Falha ao limpar linha ${rowNum} em "${tabName}"`);
 }
 
 async function ensureListValue(field, value){
