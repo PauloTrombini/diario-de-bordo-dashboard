@@ -652,6 +652,18 @@ const parada = num(r['Tempo de Parada (min)']) || 0;
 return `${fmtNum(disp - parada, 0)} min`;
 }
 
+// Disp Eff% = Horas Úteis / Disponibilidade (min), em percentual — coluna
+// nova (pedido do usuário em 2026-08-03), calculada só no dashboard (não
+// existe na planilha), mesmo padrão da Horas Úteis logo acima.
+function fmtDispEff(r){
+if (!r['Hora Inicio OP'] || !r['Hora Fim OP']) return '—';
+const disp = num(r['Disponibilidade (minutos)']);
+if (disp == null || disp === 0) return '—';
+const parada = num(r['Tempo de Parada (min)']) || 0;
+const horasUteis = disp - parada;
+return `${fmtNum((horasUteis / disp) * 100, 2)}%`;
+}
+
 // Dashboard 1 — "Detalhe Diário de Bordo": vai de Data até Observações (o
 // núcleo operacional do registro: quem, onde, quanto produziu, meta, Eff%,
 // parada, e agora também o início/fim da OP e a Disponibilidade calculada),
@@ -669,6 +681,7 @@ const COLUMNS_DETALHE = [
 { key: 'Tempo ciclo/hora', label: 'Temp. Ciclo/h' },
 { key: 'Prod./hora', label: 'Prod./h', render: fmtProdutividade },
 { key: 'Eff %', label: 'Eff %' },
+{ key: 'Disp Eff%', label: 'Disp Eff%', render: fmtDispEff },
 { key: 'Hora Inicio OP', label: 'Início OP' },
 { key: 'Hora Fim OP', label: 'Fim OP' },
 { key: 'Disponibilidade (minutos)', label: 'Disp. (min)', render: fmtDisponibilidade },
@@ -1403,14 +1416,12 @@ renderColumnsTable(rows, COLUMNS_DETALHE, 'tblDetalheHeadRow', 'tblDetalhe', edi
 // colunas visíveis naquela tabela.
 function renderColumnsTable(rows, columns, headRowId, tableId, editing, colorByEff = true){
 const headRow = document.getElementById(headRowId);
-// 'Horas Uteis' (Detalhe) é calculada só no dashboard, não existe na
-// planilha — por isso não tem letra de coluna própria. columnLetter()
-// retorna '' nesse caso; omitimos o rótulo "(Coluna X)" quando isso acontece,
-// em vez de mostrar "(Coluna )" vazio.
-headRow.innerHTML = columns.map(c => {
-const col = columnLetter(c.key);
-return `<th>${c.label}${col ? `<br><span class="col-tag-th">(Coluna ${col})</span>` : ''}</th>`;
-}).join('') + '<th></th>';
+// Pedido do usuário (2026-08-03): tirar do dashboard as referências de
+// coluna da planilha ("(Coluna X)") que ficavam abaixo do título de cada
+// coluna — eram úteis durante o desenvolvimento, mas confundiam quem só
+// usa o dashboard no dia a dia. columnLetter() continua existindo e sendo
+// usado nas fórmulas internas; só paramos de exibir o resultado dele aqui.
+headRow.innerHTML = columns.map(c => `<th>${c.label}</th>`).join('') + '<th></th>';
 
 const tbody = document.querySelector('#' + tableId + ' tbody');
 if (!rows.length){
