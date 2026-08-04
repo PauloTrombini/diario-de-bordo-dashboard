@@ -582,11 +582,13 @@ const COMPUTED_FIELDS = {
 'Tempo ciclo/hora': `=IFERROR(VLOOKUP(INDIRECT("${columnLetter('Produto')}"&ROW());Metas!$B$1:$F$57;3;FALSE);"")`,
 // Prod./hora (coluna J — renomeada pelo usuário de "Podutividade/hora"
 // para "Prod./hora" direto na planilha): Producao no Turno dividido por
-// (Disponibilidade em minutos − 90), vezes 60 — os 90 minutos são o
-// intervalo fixo (1,5h de "Horas programadas" da aba Metas) descontado do
-// turno. Fórmula idêntica à da planilha, só com columnLetter() no lugar de
-// "G2"/"U2" fixos.
-'Prod./hora': `=IFERROR((INDIRECT("${columnLetter('Producao no Turno (Un)')}"&ROW())/(INDIRECT("${columnLetter('Disponibilidade (minutos)')}"&ROW())-90))*60;"")`,
+// Disponibilidade em minutos, vezes 60. Atualizado em 2026-08-04 — o
+// usuário removeu o desconto fixo de 90 min (antes: Disponibilidade−90)
+// direto na planilha; a fórmula em Sheets ficou "...−0" (subtrai zero em
+// vez de 90), mantida assim de propósito pra facilitar reajuste futuro.
+// Fórmula com columnLetter() no lugar de "G2"/"U2" fixos, pra sempre
+// aplicar automaticamente em qualquer linha nova/editada.
+'Prod./hora': `=IFERROR((INDIRECT("${columnLetter('Producao no Turno (Un)')}"&ROW())/(INDIRECT("${columnLetter('Disponibilidade (minutos)')}"&ROW())-0))*60;"")`,
 // Eff % agora é Prod./hora ÷ Tempo ciclo/hora (antes era Producao/
 // Meta) — mudança de método de cálculo pedida pelo usuário em 2026-07-28.
 'Eff %': `=IFERROR(INDIRECT("${columnLetter('Prod./hora')}"&ROW())/INDIRECT("${columnLetter('Tempo ciclo/hora')}"&ROW());"")`,
@@ -1456,6 +1458,15 @@ const anchorStr = document.getElementById('fTpmData').value;
 const status = document.getElementById('fTpmStatus').value;
 const dataConclusaoIso = document.getElementById('fTpmDataConclusao').value; // YYYY-MM-DD ou ''
 let filtered = filterRowsByPeriod(ALL_ROWS, periodo, anchorStr);
+// Pedido do usuário (2026-08-04): só aparecer no TPM linha que já tem as 3
+// informações de RCA preenchidas (Descrição, Causa Raiz e Ação Corretiva).
+// Linha só com Data/Linha-Máquina (ocorrência lançada mas ainda sem
+// investigação) fica de fora até alguém preencher os três campos.
+filtered = filtered.filter(r =>
+(r['Descricao da Ocorrencia'] || '').trim() &&
+(r['Causa Raiz'] || '').trim() &&
+(r['Acao Corretiva'] || '').trim()
+);
 if (status){
 filtered = filtered.filter(r => r['Status'] === status);
 }
