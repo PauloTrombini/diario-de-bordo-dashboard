@@ -875,7 +875,7 @@ return {headers: headers.map(h => h.trim()), data};
 // próxima linha livre nós mesmos, a partir de RAW_MAIN_ROWS (que inclui as
 // linhas-template), e escrevemos direto nela com updateRow (PUT), evitando o
 // :append para essa aba.
-function nextEmptyRow(){
+function occupiedParadaRows(){ return new Set(RAW_PARADAS_ROWS.filter(r => r['Data']).map(r => r._row)); } function nextFreeRow(occupied, startRow){ let row = startRow || 2; while (occupied.has(row)) row++; return row; } function nextEmptyRow(){
 const occupied = new Set(RAW_MAIN_ROWS.filter(r => r['Data']).map(r => r._row));
 let row = 2; // linha 1 é o cabeçalho
 while (occupied.has(row)) row++;
@@ -1876,8 +1876,11 @@ try {
 const targetRow = nextEmptyRow();
 await updateRow(TAB_MAIN, targetRow, buildRowValues(data));
 const denorm = denormFromFormData(data);
+const occupiedParadas = occupiedParadaRows();
 for (const p of paradaEntries){
-await appendRow(GID_PARADAS, TAB_PARADAS, buildRowValuesParadas(p, targetRow, denorm));
+const paradaRow = nextFreeRow(occupiedParadas);
+await updateRow(TAB_PARADAS, paradaRow, buildRowValuesParadas(p, targetRow, denorm));
+occupiedParadas.add(paradaRow);
 }
 showToast('Registro criado.' + (paradaEntries.length ? ` ${paradaEntries.length} parada(s) registrada(s).` : ''), true);
 closeNewRecordModal();
@@ -1919,8 +1922,11 @@ const paradaEntries = collectParadaEntries('edit');
 try {
 await updateRow(TAB_MAIN, rowNum, buildRowValues(data));
 const denorm = denormFromFormData(data);
+const occupiedParadas = occupiedParadaRows();
 for (const p of paradaEntries){
-await appendRow(GID_PARADAS, TAB_PARADAS, buildRowValuesParadas(p, rowNum, denorm));
+const paradaRow = nextFreeRow(occupiedParadas);
+await updateRow(TAB_PARADAS, paradaRow, buildRowValuesParadas(p, rowNum, denorm));
+occupiedParadas.add(paradaRow);
 }
 showToast('Registro atualizado.' + (paradaEntries.length ? ` ${paradaEntries.length} parada(s) registrada(s).` : ''), true);
 closeEditModal();
