@@ -565,7 +565,7 @@ const COMPUTED_FIELDS = {
 // dia). Esta constante é reaplicada TODA VEZ que um registro é
 // criado/editado (buildRowValues), então precisa ficar em sincronia com
 // TAB_PARADAS ou o total volta a zerar no próximo salvamento.
-'Tempo de Parada (min)': `=IFERROR(SUMIFS('Histórico Paradas'!$J:$J;'Histórico Paradas'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Paradas'!$A:$A;INDIRECT("${columnLetter('Data')}"&ROW()));0)`,
+'Tempo de Parada (min)': `=IFERROR(SUMIFS('Histórico Paradas'!$J:$J;'Histórico Paradas'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Paradas'!$A:$A;INDIRECT("${columnLetter('Data')}"&ROW());'Histórico Paradas'!$D:$D;INDIRECT("${columnLetter('Operador')}"&ROW()));0)`,
 // META vem da aba "Metas" (Linha/Maquina -> Meta, coluna F/6ª da aba
 // Metas), por VLOOKUP na Linha/Maquina desta mesma linha — fórmula mantida
 // idêntica à que já existia na planilha (confirmada em 2026-07-28), só
@@ -620,10 +620,10 @@ const FORM_FIELDS_FROM_OBS = FORM_FIELDS.filter(f => !FORM_FIELDS_BEFORE_OBS.inc
 
 const FIELD_TYPES = {
 'Data': 'date',
-'Producao no Turno (Un)': 'number',
 'Hora Inicio OP': 'time',
 'Hora Fim OP': 'time',
 };
+   const FIELD_DECIMAL = ['Producao no Turno (Un)'];
 const FIELD_TEXTAREA = ['Descricao da Ocorrencia', 'Causa Raiz', 'Acao Corretiva', 'Observacoes'];
 
 // Mostra "—" em vez de "0" quando falta Hora Início OP ou Hora Fim OP (a
@@ -1534,9 +1534,10 @@ return `<div class="field-row full"><label>${fieldLabel(field)}</label>
 }
 const type = FIELD_TYPES[field] || 'text';
 const inputVal = type === 'date' ? brToISO(val) : val;
-const placeholder = field === 'Ordem de produção' ? ' placeholder="Nº da ordem de produção"' : '';
+const placeholder = field === 'Ordem de produção' ? ' placeholder="Nº da ordem de produção"' : (FIELD_DECIMAL.includes(field) ? ' placeholder="Ex: 90,04"' : '');
+   const decimalAttrs = FIELD_DECIMAL.includes(field) ? ' inputmode="decimal"' : '';
 return `<div class="field-row"><label>${fieldLabel(field)}</label>
-<input type="${type}" name="${field}" value="${inputVal}"${placeholder}></div>`;
+<input type="${type}" name="${field}" value="${inputVal}"${placeholder}${decimalAttrs}></div>`;
 }
 
 function readFormValues(form){
@@ -1717,9 +1718,9 @@ return {
 // mesmo dia) — por isso recebe ordemProducao E dataRegistro do
 // registro-pai, além do rowNum (que continua sendo usado só pra reabrir
 // o modal certo depois de editar/excluir uma parada).
-function existingParadasHtml(rowNum, ordemProducao, dataRegistro){
+function existingParadasHtml(rowNum, ordemProducao, dataRegistro, operador){
 const linked = (ordemProducao && dataRegistro)
-? RAW_PARADAS_ROWS.filter(r => r['Ordem de Produção'] === ordemProducao && r['Data'] === dataRegistro && r['Hora Início'])
+? RAW_PARADAS_ROWS.filter(r => r['Ordem de Produção'] === ordemProducao && r['Data'] === dataRegistro && (r['Operador'] || '') === (operador || '') && r['Hora Início'])
 : [];
 if (!linked.length){
 return '<div class="paradas-existing hint">Nenhuma parada lançada ainda para este registro.</div>';
@@ -1840,7 +1841,7 @@ const sub = row
 ? `${row['Data'] || ''} · ${row['Ordem de produção'] || ''} · ${row['Linha/Maquina'] || ''} · ${row['Operador'] || ''}`
 : '';
 document.getElementById('viewParadasSub').textContent = sub;
-document.getElementById('viewParadasBody').innerHTML = existingParadasHtml(rowNum, row ? row['Ordem de produção'] : '', row ? row['Data'] : '');
+document.getElementById('viewParadasBody').innerHTML = existingParadasHtml(rowNum, row ? row['Ordem de produção'] : '', row ? row['Data'] : '', row ? row['Operador'] : '');
 document.getElementById('viewParadasOverlay').classList.add('open');
 }
 function closeParadasViewModal(){
@@ -1902,7 +1903,7 @@ paradaRowIds.edit = [];
 form.innerHTML = FORM_FIELDS_BEFORE_OBS.map(field =>
 field === 'Produto' ? produtoFieldRowHtml('edit', row['Linha/Maquina'] || '', row['Produto'] || '') : fieldRowHtml(field, row[field] || '', 'dl_edit')
 ).join('')
-+ paradasSectionHtml('edit', existingParadasHtml(rowNum, row['Ordem de produção'], row['Data']))
++ paradasSectionHtml('edit', existingParadasHtml(rowNum, row['Ordem de produção'], row['Data'], row['Operador']))
 + FORM_FIELDS_FROM_OBS.map(field => fieldRowHtml(field, row[field] || '', 'dl_edit')).join('');
 renderParadasRows('edit');
 attachProdutoCascade(form, 'edit');
