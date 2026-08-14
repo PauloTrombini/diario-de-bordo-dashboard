@@ -179,7 +179,7 @@ grid-template-columns:1fr 1fr 1fr 1.6fr; background:transparent; align-items:cen
 .parada-row-readonly.editable{
 grid-template-columns:1fr 1fr 1fr 1.6fr auto auto;
 }
-.paradas-total{ font-size:13px; color:var(--txt2); margin:6px 0 14px; }
+.horario-row{ grid-template-columns:1fr 1fr auto; } .horario-row-readonly{ grid-template-columns:1fr 1fr; } .horario-row-readonly.editable{ grid-template-columns:1fr 1fr auto auto; } .paradas-total{ font-size:13px; color:var(--txt2); margin:6px 0 14px; }
 .paradas-total strong{ color:var(--txt); }
 .paradas-existing{ margin-bottom:14px; }
 .hint{ color:var(--txt2); font-size:12px; }
@@ -393,7 +393,7 @@ main{ padding:14px 12px 40px; }
 </div>
 </div>
 
-<div id="toastBox"></div>
+<div class="overlay" id="viewHorariosOverlay"><div class="modal" style="width:70vw; height:auto; max-height:80vh;"><h3>Horários de Operação do Registro</h3><div class="modal-sub" id="viewHorariosSub"></div><div id="viewHorariosBody" style="overflow:auto; flex:1;"></div><div class="modal-actions"><button type="button" class="btn" onclick="closeHorarioViewModal()">Fechar</button></div></div></div><div class="overlay" id="editHorarioOverlay"><div class="modal" style="max-width:480px;"><h3>Editar Horário OP</h3><div class="modal-sub">Corrige este lançamento direto na aba "Histórico Horários OP".</div><form id="editHorarioForm"><div class="field-row"><label>Início</label><input type="time" id="ehInicio"></div><div class="field-row"><label>Fim</label><input type="time" id="ehFim"></div></form><div class="modal-actions"><button type="button" class="btn" onclick="closeEditHorarioModal()">Cancelar</button><button type="button" class="btn btn-primary" id="editHorarioSaveBtn" onclick="submitEditHorario()">Salvar</button></div></div></div><div id="toastBox"></div>
 
 <script>
 // =====================================================================
@@ -442,7 +442,7 @@ const COMPUTED_FIELDS_PARADAS = {
 // inserção de linhas, pois só olha a própria linha).
 'Duração (min)': '=IFERROR((INDIRECT("F"&ROW())-INDIRECT("E"&ROW()))*1440;"")',
 };
-// "12 - EMBALAGEM + ARMAZENAMENTO" (formato do dropdown) -> ["12", "EMBALAGEM + ARMAZENAMENTO"]
+const TAB_HORARIOS_OP = 'Histórico Horários OP'; const GID_HORARIOS_OP = '602693158'; const FIELDS_HORARIOS_OP = ['Data', 'Ordem de Produção', 'Máquina', 'Operador', 'Hora Início OP', 'Hora Fim OP', 'Duração (min)', 'LINHA_DIARIO']; const COMPUTED_FIELDS_HORARIOS_OP = { 'Duração (min)': '=IFERROR((INDIRECT("F"&ROW())-INDIRECT("E"&ROW()))*1440;"")' }; // "12 - EMBALAGEM + ARMAZENAMENTO" (formato do dropdown) -> ["12", "EMBALAGEM + ARMAZENAMENTO"]
 function splitCodigoMotivo(s){
 const m = /^(\d+)\s*-\s*(.*)$/.exec(s || '');
 return m ? [m[1], m[2]] : ['', s || ''];
@@ -599,11 +599,11 @@ const COMPUTED_FIELDS = {
 // calcula (célula vazia vira 0 no Sheets), então o dashboard trata isso na
 // exibição (mostra "—" em vez de "0 min" quando falta um dos dois
 // horários) — ver fmtDisponibilidade/COLUMNS_DETALHE.
-'Disponibilidade (minutos)': `=IFERROR((INDIRECT("${columnLetter('Hora Fim OP')}"&ROW())-INDIRECT("${columnLetter('Hora Inicio OP')}"&ROW()))*24*60;"")`,
+'Disponibilidade (minutos)': `=IFERROR(SUMIFS('Histórico Horários OP'!$G:$G;'Histórico Horários OP'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Horários OP'!$A:$A;INDIRECT("${columnLetter('Data')}"&ROW());'Histórico Horários OP'!$D:$D;INDIRECT("${columnLetter('Operador')}"&ROW()));0)`,
 };
 
 // Campos exibidos nos formulários de novo registro / edição (todos exceto os calculados).
-const FORM_FIELDS = FIELDS_ALL.filter(f => !(f in COMPUTED_FIELDS));
+const FORM_FIELDS = FIELDS_ALL.filter(f => !(f in COMPUTED_FIELDS) && f !== 'Hora Inicio OP' && f !== 'Hora Fim OP');
 // Ordem de EXIBIÇÃO do formulário (Novo Registro/Editar) — independente da
 // posição física das colunas na planilha. 'Hora Inicio OP'/'Hora Fim OP'
 // ficam fisicamente no fim da planilha (O/P, pra não deslocar as colunas já
@@ -613,7 +613,7 @@ const FORM_FIELDS = FIELDS_ALL.filter(f => !(f in COMPUTED_FIELDS));
 // depois desse grupo e antes de Observações; o resto (Observações em
 // diante) vem por último, na ordem de FIELDS_ALL.
 const FORM_FIELDS_BEFORE_OBS = [
-'Data', 'Ordem de produção', 'Hora Inicio OP', 'Hora Fim OP',
+'Data', 'Ordem de produção',
 'Linha/Maquina', 'Produto', 'Operador', 'Producao no Turno (Un)',
 ];
 const FORM_FIELDS_FROM_OBS = FORM_FIELDS.filter(f => !FORM_FIELDS_BEFORE_OBS.includes(f));
@@ -630,7 +630,7 @@ const FIELD_TEXTAREA = ['Descricao da Ocorrencia', 'Causa Raiz', 'Acao Corretiva
 // fórmula de Disponibilidade calcula 0 nesse caso, já que INDIRECT de uma
 // célula vazia retorna 0 no Sheets — não é um erro, então IFERROR não pega).
 function fmtDisponibilidade(r){
-if (!r['Hora Inicio OP'] || !r['Hora Fim OP']) return '—';
+if (!hasHorarioEntries(r)) return '—';
 const min = num(r['Disponibilidade (minutos)']);
 return min == null ? '—' : `${fmtNum(min, 0)} min`;
 }
@@ -647,7 +647,7 @@ return v == null ? '—' : fmtNum(v, 2);
 // não tem "Coluna X" associada (ver renderColumnsTable, que omite o rótulo
 // de coluna quando columnLetter() não encontra o campo em FIELDS_ALL).
 function fmtHorasUteis(r){
-if (!r['Hora Inicio OP'] || !r['Hora Fim OP']) return '—';
+if (!hasHorarioEntries(r)) return '—';
 const disp = num(r['Disponibilidade (minutos)']);
 if (disp == null) return '—';
 const parada = num(r['Tempo de Parada (min)']) || 0;
@@ -658,7 +658,7 @@ return `${fmtNum(disp - parada, 0)} min`;
 // nova (pedido do usuário em 2026-08-03), calculada só no dashboard (não
 // existe na planilha), mesmo padrão da Horas Úteis logo acima.
 function fmtDispEff(r){
-if (!r['Hora Inicio OP'] || !r['Hora Fim OP']) return '—';
+if (!hasHorarioEntries(r)) return '—';
 const disp = num(r['Disponibilidade (minutos)']);
 if (disp == null || disp === 0) return '—';
 const parada = num(r['Tempo de Parada (min)']) || 0;
@@ -743,7 +743,7 @@ const OPTION_STORE = {};
 // eram fixos no código); sobrescritos pela aba "Faixas Eff" quando presente
 // e válida (ver refresh()).
 let EFF_THRESHOLDS = { verde: 75, amarelo: 60 };
-let RAW_PARADAS_ROWS = []; // linhas cruas da aba PARADAS MAQ, usado para listar as paradas já lançadas de um registro
+let RAW_PARADAS_ROWS = []; // linhas cruas da aba PARADAS MAQ, usado para listar as paradas já lançadas de um registro let RAW_HORARIOS_ROWS = []; // linhas cruas da aba "Histórico Horários OP", mesmo padrão de RAW_PARADAS_ROWS
 let CODIGO_PARADA_OPTIONS = []; // strings "<codigo> - <categoria 1>" para o dropdown de código de parada
 let METAS_MAP = {}; // Linha/Maquina -> [produtos] (aba Metas), para o dropdown dependente de Produto no Novo Registro/Edição
 // Lançamentos de parada ainda não gravados, mantidos em memória enquanto o
@@ -1437,7 +1437,7 @@ const content = c.render ? c.render(r) : (c.badge ? badge(r[c.key], statusBadgeC
 return `<td${cls}>${content}</td>`;
 }).join('');
 const actions = `<td>
-<button class="btn icon-btn" title="Ver Paradas" onclick="openParadasViewModal(${r._row})">🕒</button>
+<button class="btn icon-btn" title="Ver Paradas" onclick="openParadasViewModal(${r._row})">🕒</button><button class="btn icon-btn" title="Ver Horários OP" onclick="openHorarioViewModal(${r._row})">⏱️</button>
 ${editing ? `<button class="btn icon-btn" title="Editar" onclick="openEditModal(${r._row})">✏️</button>` : ''}
 </td>`;
 // O destaque verde/amarelo/vermelho por Eff % só faz sentido no dashboard
@@ -1559,7 +1559,7 @@ return data;
 // quando o registro principal é salvo — um único botão de salvar grava o
 // registro no Diario de Bordo E as paradas lançadas no PARADAS MAQ.
 let paradaRowIds = { new: [], edit: [] };
-let paradaRowSeq = 0;
+let paradaRowSeq = 0; let horarioRowIds = { new: [], edit: [] }; let horarioRowSeq = 0; let _editHorarioCtx = null;
 
 function paradasSectionHtml(mode, existingHtml){
 return `<div class="field-row full paradas-block">
@@ -1627,7 +1627,7 @@ return `<div class="parada-row" id="paradaRow_${mode}_${id}">
 // campos da MESMA linha (e viram pra linha seguinte/anterior nas pontas);
 // cima/baixo pulam pro mesmo campo na linha de cima/baixo — como mover entre
 // células de uma planilha.
-function handleParadaKeyNav(e, mode){
+function horariosSectionHtml(mode, existingHtml){ return `<div class="field-row full paradas-block"><label>Horários de Operação</label>${existingHtml || ''}<div class="paradas-list" id="horariosList_${mode}"></div><button type="button" class="btn btn-add-parada" onclick="addHorarioRow('${mode}')">+ Adicionar horário</button></div>`; } function addHorarioRow(mode){ const id = ++horarioRowSeq; horarioRowIds[mode].push(id); const list = document.getElementById('horariosList_' + mode); if (!list) return; if (horarioRowIds[mode].length === 1){ list.innerHTML = horarioRowHtml(mode, id); } else { list.insertAdjacentHTML('beforeend', horarioRowHtml(mode, id)); } const novaLinha = document.getElementById(`horarioRow_${mode}_${id}`); if (novaLinha) novaLinha.querySelector('.hr-inicio').focus(); } function removeHorarioRow(mode, id){ horarioRowIds[mode] = horarioRowIds[mode].filter(x => x !== id); const row = document.getElementById(`horarioRow_${mode}_${id}`); if (row) row.remove(); if (!horarioRowIds[mode].length){ const list = document.getElementById('horariosList_' + mode); if (list) list.innerHTML = '<div class="hint">Nenhum horário adicionado ainda nesta edição.</div>'; } } function renderHorarioRows(mode){ const list = document.getElementById('horariosList_' + mode); if (!list) return; list.innerHTML = horarioRowIds[mode].length ? horarioRowIds[mode].map(id => horarioRowHtml(mode, id)).join('') : '<div class="hint">Nenhum horário adicionado ainda nesta edição.</div>'; } const HORARIO_ROW_COLS = ['.hr-inicio', '.hr-fim']; function horarioRowHtml(mode, id){ const nav = `onkeydown="handleHorarioKeyNav(event, '${mode}')"`; return `<div class="parada-row horario-row" id="horarioRow_${mode}_${id}"><div><label>Início</label><input type="time" class="hr-inicio" ${nav}></div><div><label>Fim</label><input type="time" class="hr-fim" ${nav}></div><button type="button" class="btn icon-btn" title="Remover" tabindex="-1" onclick="removeHorarioRow('${mode}', ${id})">✕</button></div>`; } function handleHorarioKeyNav(e, mode){ const key = e.key; if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key)) return; const list = document.getElementById('horariosList_' + mode); if (!list) return; const rows = Array.from(list.querySelectorAll('.horario-row')); const currentRow = e.target.closest('.horario-row'); const rowIdx = rows.indexOf(currentRow); const colIdx = HORARIO_ROW_COLS.findIndex(sel => e.target.matches(sel)); if (rowIdx === -1 || colIdx === -1) return; let targetRow = rowIdx, targetCol = colIdx; if (key === 'ArrowRight'){ targetCol++; if (targetCol > HORARIO_ROW_COLS.length - 1){ targetCol = 0; targetRow++; } } else if (key === 'ArrowLeft'){ targetCol--; if (targetCol < 0){ targetCol = HORARIO_ROW_COLS.length - 1; targetRow--; } } else if (key === 'ArrowDown'){ targetRow++; } else if (key === 'ArrowUp'){ targetRow--; } if (targetRow < 0 || targetRow >= rows.length) return; const targetField = rows[targetRow].querySelector(HORARIO_ROW_COLS[targetCol]); if (targetField){ e.preventDefault(); targetField.focus(); if (typeof targetField.select === 'function') targetField.select(); } } function collectHorarioEntries(mode){ const entries = []; horarioRowIds[mode].forEach(id => { const row = document.getElementById(`horarioRow_${mode}_${id}`); if (!row) return; const inicio = row.querySelector('.hr-inicio').value; const fim = row.querySelector('.hr-fim').value; if (inicio && fim) entries.push({ inicio, fim }); }); return entries; } function buildRowValuesHorarios(entry, linhaDiario, denorm){ const d = denorm || {}; const dataByField = { 'Data': d['Data'] || '', 'Ordem de Produção': d['Ordem de Produção'] || '', 'Máquina': d['Máquina'] || '', 'Operador': d['Operador'] || '', 'Hora Início OP': entry.inicio, 'Hora Fim OP': entry.fim, 'LINHA_DIARIO': linhaDiario }; return FIELDS_HORARIOS_OP.map(f => (f in COMPUTED_FIELDS_HORARIOS_OP) ? COMPUTED_FIELDS_HORARIOS_OP[f] : (dataByField[f] ?? '')); } function occupiedHorarioRows(){ return new Set(RAW_HORARIOS_ROWS.filter(r => r['Data']).map(r => r._row)); } function existingHorariosHtml(rowNum, ordemProducao, dataRegistro, operador){ const linked = (ordemProducao && dataRegistro) ? RAW_HORARIOS_ROWS.filter(r => r['Ordem de Produção'] === ordemProducao && r['Data'] === dataRegistro && (r['Operador'] || '') === (operador || '') && r['Hora Início OP']) : []; if (!linked.length){ return '<div class="paradas-existing hint">Nenhum horário lançado ainda para este registro.</div>'; } const total = linked.reduce((s, r) => s + (num(r['Duração (min)']) || 0), 0); const editable = !!accessToken; const rows = linked.map(r => `<div class="parada-row parada-row-readonly horario-row-readonly${editable ? ' editable' : ''}"><div>${r['Hora Início OP']} – ${r['Hora Fim OP']}</div><div>${fmtNum(num(r['Duração (min)']) || 0)} min</div>${editable ? `<button type="button" class="btn icon-btn" title="Editar este horário" onclick="openEditHorarioModal(${r._row}, ${rowNum})">✏️</button>` : ''}${editable ? `<button type="button" class="btn icon-btn" title="Excluir este horário" onclick="deleteHorarioRow(${r._row}, ${rowNum})">🗑️</button>` : ''}</div>`).join(''); return `<div class="paradas-existing">${rows}<div class="paradas-total">Já lançado: <strong>${fmtNum(total)} min</strong></div></div>`; } function hasHorarioEntries(r){ return RAW_HORARIOS_ROWS.some(h => h['Ordem de Produção'] === r['Ordem de produção'] && h['Data'] === r['Data'] && (h['Operador'] || '') === (r['Operador'] || '') && h['Hora Início OP']); } function handleParadaKeyNav(e, mode){
 const key = e.key;
 if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key)) return;
 const list = document.getElementById('paradasList_' + mode);
@@ -1851,15 +1851,15 @@ document.getElementById('viewParadasOverlay').classList.remove('open');
 // =====================================================================
 // Modal: novo registro
 // =====================================================================
-function openNewRecordModal(){
+function openHorarioViewModal(rowNum){ const row = lastRows.find(r => r._row === rowNum); const sub = row ? `${row['Data'] || ''} · ${row['Ordem de produção'] || ''} · ${row['Linha/Maquina'] || ''} · ${row['Operador'] || ''}` : ''; document.getElementById('viewHorariosSub').textContent = sub; document.getElementById('viewHorariosBody').innerHTML = existingHorariosHtml(rowNum, row ? row['Ordem de produção'] : '', row ? row['Data'] : '', row ? row['Operador'] : ''); document.getElementById('viewHorariosOverlay').classList.add('open'); } function closeHorarioViewModal(){ document.getElementById('viewHorariosOverlay').classList.remove('open'); } function openEditHorarioModal(horarioRow, parentRow){ const rec = RAW_HORARIOS_ROWS.find(r => r._row === horarioRow); if (!rec) return; document.getElementById('ehInicio').value = rec['Hora Início OP'] || ''; document.getElementById('ehFim').value = rec['Hora Fim OP'] || ''; const origin = document.getElementById('viewHorariosOverlay').classList.contains('open') ? 'view' : 'edit'; _editHorarioCtx = { horarioRow, parentRow, origin }; document.getElementById('editHorarioOverlay').classList.add('open'); } function closeEditHorarioModal(){ document.getElementById('editHorarioOverlay').classList.remove('open'); } async function submitEditHorario(){ if (!_editHorarioCtx) return; const { horarioRow, parentRow, origin } = _editHorarioCtx; const inicio = document.getElementById('ehInicio').value; const fim = document.getElementById('ehFim').value; if (!inicio || !fim){ showToast('Preencha início e fim do horário.', false); return; } const saveBtn = document.getElementById('editHorarioSaveBtn'); saveBtn.disabled = true; saveBtn.textContent = 'Salvando…'; try { const rec = RAW_HORARIOS_ROWS.find(r => r._row === horarioRow) || {}; const denorm = { 'Data': rec['Data'], 'Ordem de Produção': rec['Ordem de Produção'], 'Máquina': rec['Máquina'], 'Operador': rec['Operador'] }; const values = buildRowValuesHorarios({ inicio, fim }, parentRow, denorm); await updateRow(TAB_HORARIOS_OP, horarioRow, values); showToast('Horário atualizado.', true); closeEditHorarioModal(); await refresh(); if (origin === 'view') openHorarioViewModal(parentRow); else openEditModal(parentRow); } catch (e) { showToast('Erro ao salvar horário: ' + e.message, false); } finally { saveBtn.disabled = false; saveBtn.textContent = 'Salvar'; } } async function deleteHorarioRow(horarioRow, parentRow){ const rec = RAW_HORARIOS_ROWS.find(r => r._row === horarioRow); const desc = rec ? `${rec['Hora Início OP']} – ${rec['Hora Fim OP']}` : 'este horário'; if (!confirm(`Excluir o lançamento ${desc}? Essa ação não pode ser desfeita.`)) return; const origin = document.getElementById('viewHorariosOverlay').classList.contains('open') ? 'view' : 'edit'; try { await clearRow(TAB_HORARIOS_OP, horarioRow, FIELDS_HORARIOS_OP.length); showToast('Horário excluído.', true); await refresh(); if (origin === 'view') openHorarioViewModal(parentRow); else openEditModal(parentRow); } catch (e) { showToast('Erro ao excluir horário: ' + e.message, false); } } function openNewRecordModal(){
 const form = document.getElementById('newRecordForm');
-paradaRowIds.new = [];
+paradaRowIds.new = []; horarioRowIds.new = [];
 form.innerHTML = FORM_FIELDS_BEFORE_OBS.map(field =>
 field === 'Produto' ? produtoFieldRowHtml('new', '', '') : fieldRowHtml(field, '', 'dl_new')
 ).join('')
-+ paradasSectionHtml('new')
++ horariosSectionHtml('new') + paradasSectionHtml('new')
 + FORM_FIELDS_FROM_OBS.map(field => fieldRowHtml(field, '', 'dl_new')).join('');
-renderParadasRows('new');
+renderHorarioRows('new'); renderParadasRows('new');
 attachProdutoCascade(form, 'new');
 document.getElementById('newRecordOverlay').classList.add('open');
 }
@@ -1872,7 +1872,7 @@ const data = readFormValues(form);
 for (const field of FORM_FIELDS){
 await ensureListValue(field, data[field]);
 }
-const paradaEntries = collectParadaEntries('new');
+const paradaEntries = collectParadaEntries('new'); const horarioEntries = collectHorarioEntries('new');
 try {
 const targetRow = nextEmptyRow();
 await updateRow(TAB_MAIN, targetRow, buildRowValues(data));
@@ -1883,7 +1883,7 @@ const paradaRow = nextFreeRow(occupiedParadas);
 await updateRow(TAB_PARADAS, paradaRow, buildRowValuesParadas(p, targetRow, denorm));
 occupiedParadas.add(paradaRow);
 }
-showToast('Registro criado.' + (paradaEntries.length ? ` ${paradaEntries.length} parada(s) registrada(s).` : ''), true);
+const occupiedHorarios = occupiedHorarioRows(); for (const h of horarioEntries){ const horarioRow = nextFreeRow(occupiedHorarios); await updateRow(TAB_HORARIOS_OP, horarioRow, buildRowValuesHorarios(h, targetRow, denorm)); occupiedHorarios.add(horarioRow); } showToast('Registro criado.' + (paradaEntries.length ? ` ${paradaEntries.length} parada(s) registrada(s).` : '') + (horarioEntries.length ? ` ${horarioEntries.length} horário(s) registrado(s).` : ''), true);
 closeNewRecordModal();
 await refresh();
 } catch (e) {
@@ -1899,13 +1899,13 @@ const row = lastRows.find(r => r._row === rowNum);
 if (!row) return;
 const form = document.getElementById('editForm');
 form.dataset.row = rowNum;
-paradaRowIds.edit = [];
+paradaRowIds.edit = []; horarioRowIds.edit = [];
 form.innerHTML = FORM_FIELDS_BEFORE_OBS.map(field =>
 field === 'Produto' ? produtoFieldRowHtml('edit', row['Linha/Maquina'] || '', row['Produto'] || '') : fieldRowHtml(field, row[field] || '', 'dl_edit')
 ).join('')
-+ paradasSectionHtml('edit', existingParadasHtml(rowNum, row['Ordem de produção'], row['Data'], row['Operador']))
++ horariosSectionHtml('edit', existingHorariosHtml(rowNum, row['Ordem de produção'], row['Data'], row['Operador'])) + paradasSectionHtml('edit', existingParadasHtml(rowNum, row['Ordem de produção'], row['Data'], row['Operador']))
 + FORM_FIELDS_FROM_OBS.map(field => fieldRowHtml(field, row[field] || '', 'dl_edit')).join('');
-renderParadasRows('edit');
+renderHorarioRows('edit'); renderParadasRows('edit');
 attachProdutoCascade(form, 'edit');
 document.getElementById('editOverlay').classList.add('open');
 }
@@ -1919,7 +1919,7 @@ const data = readFormValues(form);
 for (const field of FORM_FIELDS){
 await ensureListValue(field, data[field]);
 }
-const paradaEntries = collectParadaEntries('edit');
+const paradaEntries = collectParadaEntries('edit'); const horarioEntries = collectHorarioEntries('edit');
 try {
 await updateRow(TAB_MAIN, rowNum, buildRowValues(data));
 const denorm = denormFromFormData(data);
@@ -1929,7 +1929,7 @@ const paradaRow = nextFreeRow(occupiedParadas);
 await updateRow(TAB_PARADAS, paradaRow, buildRowValuesParadas(p, rowNum, denorm));
 occupiedParadas.add(paradaRow);
 }
-showToast('Registro atualizado.' + (paradaEntries.length ? ` ${paradaEntries.length} parada(s) registrada(s).` : ''), true);
+const occupiedHorarios = occupiedHorarioRows(); for (const h of horarioEntries){ const horarioRow = nextFreeRow(occupiedHorarios); await updateRow(TAB_HORARIOS_OP, horarioRow, buildRowValuesHorarios(h, rowNum, denorm)); occupiedHorarios.add(horarioRow); } showToast('Registro atualizado.' + (paradaEntries.length ? ` ${paradaEntries.length} parada(s) registrada(s).` : '') + (horarioEntries.length ? ` ${horarioEntries.length} horário(s) registrado(s).` : ''), true);
 closeEditModal();
 await refresh();
 } catch (e) {
@@ -1996,7 +1996,7 @@ DROPDOWN_FIELDS.forEach(d => fetches.push(fetch(csvUrl(d.gid), {cache:'no-store'
 fetches.push(fetch(csvUrl(GID_PARADAS), {cache:'no-store'}));
 fetches.push(fetch(csvUrl(GID_CODIGO_PARADA), {cache:'no-store'}));
 fetches.push(fetch(csvUrl(GID_METAS), {cache:'no-store'}));
-fetches.push(fetch(csvUrl(GID_FAIXAS_EFF), {cache:'no-store'}));
+fetches.push(fetch(csvUrl(GID_FAIXAS_EFF), {cache:'no-store'})); fetches.push(fetch(csvUrl(GID_HORARIOS_OP), {cache:'no-store'}));
 const responses = await Promise.all(fetches);
 
 if (!responses[0].ok) throw new Error('Falha ao buscar dados da planilha');
@@ -2028,7 +2028,7 @@ const paradasRes = responses[1 + DROPDOWN_FIELDS.length];
 if (paradasRes && paradasRes.ok){
 RAW_PARADAS_ROWS = parseCSV(await paradasRes.text()).data;
 }
-// Aba CODIGO PARADA: lista de motivos de parada — vira o dropdown
+const horariosRes = responses[5 + DROPDOWN_FIELDS.length]; if (horariosRes && horariosRes.ok){ RAW_HORARIOS_ROWS = parseCSV(await horariosRes.text()).data; } // Aba CODIGO PARADA: lista de motivos de parada — vira o dropdown
 // "Código Parada" como "<codigo> - <categoria 1>".
 const codigoRes = responses[2 + DROPDOWN_FIELDS.length];
 if (codigoRes && codigoRes.ok){
