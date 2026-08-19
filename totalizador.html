@@ -29,7 +29,7 @@ border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer; text-decora
 .btn-primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
 .status{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--txt2); }
 .dot{ width:9px; height:9px; border-radius:50%; background:var(--green); }
-.dot.err{ background:var(--red); }
+.dot.err{ background:var(--red); }.kpi-meta-global{ display:flex; flex-direction:column; align-items:center; justify-content:center; padding:8px 22px; border-radius:10px; font-weight:700; border:1px solid var(--border); background:var(--panel2); min-width:120px; }.kpi-meta-global .kpi-label{ font-size:11px; text-transform:uppercase; letter-spacing:.04em; opacity:.85; }.kpi-meta-global .kpi-value{ font-size:30px; line-height:1.15; margin-top:2px; }.kpi-meta-global.kpi-green{ background:rgba(47,208,138,.15); border-color:var(--green); color:var(--green); }.kpi-meta-global.kpi-amber{ background:rgba(245,185,66,.15); border-color:var(--amber); color:var(--amber); }.kpi-meta-global.kpi-red{ background:rgba(246,21,92,.15); border-color:var(--red); color:var(--red); }
 
 main{ padding:24px 28px 60px; max-width:1500px; margin:0 auto; }
 
@@ -86,7 +86,7 @@ tr.total-row td{ background:#f2f2f2; }
   <h1>Totalizador de Meta — por Operador / Dia / Máquina</h1>
   <div class="sub" id="sourceLabel">carregando…</div>
   </div>
-  <div class="right-controls">
+  <div class="kpi-meta-global" id="kpiMetaGlobal"><div class="kpi-label">Meta Global</div><div class="kpi-value" id="kpiMetaGlobalValue">—</div></div><div class="right-controls">
   <a href="index.html" class="btn">← Diário de Bordo</a>
   <button class="btn btn-primary" onclick="exportarPDF()">Exportar PDF</button>
   <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">conectando…</span></div>
@@ -100,7 +100,7 @@ tr.total-row td{ background:#f2f2f2; }
   <div class="filters">
   <select id="fLinha" onchange="renderAll()"><option value="">Linha/Máquina: todas</option></select>
   <select id="fOperador" onchange="renderAll()"><option value="">Operador: todos</option></select>
-  <select id="fOrdemProducao" onchange="renderAll()"><option value="">Ordem de Produção: todas</option></select>
+  <select id="fOrdemProducao" onchange="renderAll()"><option value="">Ordem de Produção: todas</option></select><span class="filter-label">Período</span><select id="fPeriodo" onchange="renderAll()"><option value="dia">Dia</option><option value="semana">Semana</option><option value="mes">Mês</option></select>
   <span class="filter-label">Data</span>
   <input type="date" id="fData" onchange="renderAll()">
   </div>
@@ -142,7 +142,7 @@ tr.total-row td{ background:#f2f2f2; }
   const SHEET_ID = '1HNuF8KBf-k79imE2yNxkCeQKr9r6OyS84VdSHZCLTK0';
   const GID_MAIN = '1700278622';
 
-let ALL_ROWS = [];
+let ALL_ROWS = [];const GID_FAIXAS = '1163084855';let FAIXAS_EFF = [];
 
 function csvUrl(gid){
   return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}&t=${Date.now()}`;
@@ -197,7 +197,7 @@ if (!m) return null;
 return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
 }
 
-function populateSelect(id, values){
+async function loadFaixasEff(){try{const res=await fetch(csvUrl(GID_FAIXAS),{cache:'no-store'});if(!res.ok)throw new Error('Falha ao buscar Faixas Eff');const parsed=parseCSV(await res.text());FAIXAS_EFF=parsed.data.map(r=>({faixa:r['Faixa']||'',min:num(r['Minimo (%)']),max:num(r['Maximo (%)'])})).filter(f=>f.min!=null&&f.max!=null);}catch(e){console.error(e);}}function faixaClassFor(pct){if(pct==null||!FAIXAS_EFF.length)return '';const match=FAIXAS_EFF.find(f=>pct>=f.min&&pct<=f.max);if(!match)return '';const nome=(match.faixa||'').toLowerCase();if(nome.includes('verde'))return 'kpi-green';if(nome.includes('amarelo'))return 'kpi-amber';if(nome.includes('vermelho'))return 'kpi-red';return '';}function getWeekRange(anchor){const day=anchor.getDay();const diffToMonday=day===0?-6:1-day;const start=new Date(anchor);start.setDate(anchor.getDate()+diffToMonday);start.setHours(0,0,0,0);const end=new Date(start);end.setDate(start.getDate()+6);end.setHours(23,59,59,999);return {start,end};}function getPeriodRange(fDataIso, fPeriodo){if (!fDataIso || fPeriodo === 'dia') return null;const anchor = new Date(fDataIso + 'T00:00:00');if (fPeriodo === 'semana') return getWeekRange(anchor);if (fPeriodo === 'mes'){const start = new Date(anchor.getFullYear(), anchor.getMonth(), 1);const end = new Date(anchor.getFullYear(), anchor.getMonth()+1, 0, 23, 59, 59, 999);return {start, end};}return null;}function matchesPeriodo(rowDataStr, fDataIso, fDataBR, range){if (!fDataIso) return true;if (range){const rd = parseDateBR(rowDataStr);return !!rd && rd >= range.start && rd <= range.end;}return rowDataStr === fDataBR;}function populateSelect(id, values){
 const sel = document.getElementById(id);
 const current = sel.value;
 const placeholder = sel.options[0];
@@ -239,12 +239,12 @@ function filteredRows(){
 const fLinha = document.getElementById('fLinha').value;
 const fOperador = document.getElementById('fOperador').value;
 const fOrdem = document.getElementById('fOrdemProducao').value;
-const fData = isoToBR(document.getElementById('fData').value);
+const fDataIso = document.getElementById('fData').value;const fPeriodo = document.getElementById('fPeriodo').value;const fData = isoToBR(fDataIso);const fRange = getPeriodRange(fDataIso, fPeriodo);
 return ALL_ROWS.filter(r =>
 (!fLinha || r['Linha/Maquina'] === fLinha) &&
 (!fOperador || r['Operador'] === fOperador) &&
 (!fOrdem || r['Ordem de produção'] === fOrdem) &&
-(!fData || r['Data'] === fData)
+(matchesPeriodo(r['Data'], fDataIso, fData, fRange))
 );
 }
 
@@ -283,7 +283,7 @@ if (a.operador !== b.operador) return a.operador.localeCompare(b.operador, 'pt-B
 return (a.maquina || '').localeCompare(b.maquina || '', 'pt-BR');
 });
 
-const tbody = document.getElementById('tblTotalBody');
+const tbody = document.getElementById('tblTotalBody');let totMetaGlobalOuter = null;
 if (!grupos.length){
 tbody.innerHTML = '<tr><td class="empty" colspan="10">Nenhum registro para os filtros selecionados.</td></tr>';
 } else {
@@ -295,7 +295,7 @@ const totParada = grupos.reduce((s, g) => s + g.parada, 0);
 const totTempoTotal = totDisp + totParada;
 const totQtdeMeta = grupos.reduce((s, g) => s + g.qtdeProdMeta, 0);
 const totRegistros = grupos.reduce((s, g) => s + g.registros, 0);
-const totMetaGlobal = totQtdeMeta > 0 ? (totProducao / totQtdeMeta) : null;
+const totMetaGlobal = totQtdeMeta > 0 ? (totProducao / totQtdeMeta) : null;totMetaGlobalOuter = totMetaGlobal;
 tbody.innerHTML += `<tr class="total-row"> <td colspan="3">Total geral (${grupos.length} grupo${grupos.length === 1 ? '' : 's'})</td> <td>${totRegistros}</td> <td>${fmtNum(totProducao)}</td> <td>${fmtNum(totDisp)}</td> <td>${fmtNum(totParada)}</td> <td>${fmtNum(totTempoTotal)}</td> <td>${fmtNum(totQtdeMeta, 2)}</td> <td>${totMetaGlobal == null ? '—' : fmtNum(totMetaGlobal * 100, 2) + '%'}</td> </tr>`;
 }
 
@@ -305,10 +305,10 @@ const fOperador = document.getElementById('fOperador').value;
 const fOrdem = document.getElementById('fOrdemProducao').value;
 const fData = document.getElementById('fData').value;
 if (fOperador) partes.push(`Operador: ${fOperador}`);
-if (fData) partes.push(`Data: ${isoToBR(fData)}`);
+const fPeriodo = document.getElementById('fPeriodo').value;if (fData && fPeriodo === 'semana'){const rg = getWeekRange(new Date(fData + 'T00:00:00'));partes.push(`Semana: ${rg.start.toLocaleDateString('pt-BR')} a ${rg.end.toLocaleDateString('pt-BR')}`);} else if (fData && fPeriodo === 'mes'){partes.push(`Mês: ${new Date(fData + 'T00:00:00').toLocaleDateString('pt-BR', {month:'long', year:'numeric'})}`);} else if (fData){partes.push(`Data: ${isoToBR(fData)}`);}
 if (fLinha) partes.push(`Linha/Máquina: ${fLinha}`);
 if (fOrdem) partes.push(`Ordem de Produção: ${fOrdem}`);
-document.getElementById('printFiltersLine').textContent = partes.length ? `Filtros: ${partes.join(' · ')}` : 'Sem filtros aplicados (todos os registros)';
+document.getElementById('printFiltersLine').textContent = partes.length ? `Filtros: ${partes.join(' · ')}` : 'Sem filtros aplicados (todos os registros)';const kpiEl = document.getElementById('kpiMetaGlobalValue');const kpiBox = document.getElementById('kpiMetaGlobal');if (totMetaGlobalOuter != null){const pct = totMetaGlobalOuter * 100;kpiEl.textContent = fmtNum(pct, 2) + '%';kpiBox.className = 'kpi-meta-global ' + faixaClassFor(pct);} else {kpiEl.textContent = '—';kpiBox.className = 'kpi-meta-global';}
 }
 
 function exportarPDF(){
@@ -323,7 +323,7 @@ window.print();
 setTimeout(() => { document.title = original; }, 500);
 }
 
-refresh();
+loadFaixasEff();refresh();setInterval(loadFaixasEff, 300000);
 setInterval(refresh, 60000);
 </script>
 
