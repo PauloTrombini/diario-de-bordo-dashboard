@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+  <html lang="pt-BR">
+  <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Totalizador de Meta — Diário de Bordo</title>
+<style>
+:root{
+--bg:#0b0e17; --panel:#111726; --panel2:#171f33; --border:#232b42;
+--txt:#e8ecf5; --txt2:#8f9ac0; --accent:#4f8cff; --green:#2fd08a;
+  --amber:#f5b942; --red:#f5615c;
+  }
+*{ box-sizing:border-box; }
+body{ margin:0; background:var(--bg); color:var(--txt); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+html, body{ max-width:100%; overflow-x:hidden; }
+
+header{
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
+padding:18px 28px; border-bottom:1px solid var(--border);
+}
+header h1{ margin:0; font-size:19px; }
+header .sub{ color:var(--txt2); font-size:12px; margin-top:2px; }
+.right-controls{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.btn{
+  background:var(--panel2); border:1px solid var(--border); color:var(--txt);
+border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer; text-decoration:none; display:inline-block;
+}
+.btn:hover{ border-color:var(--accent); }
+.btn-primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.status{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--txt2); }
+.dot{ width:9px; height:9px; border-radius:50%; background:var(--green); }
+.dot.err{ background:var(--red); }
+
+main{ padding:24px 28px 60px; max-width:1500px; margin:0 auto; }
+
+.filters{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+.filters select, .filters input{
+  background:var(--panel2); border:1px solid var(--border); color:var(--txt);
+border-radius:8px; padding:8px 10px; font-size:13px; min-width:160px;
+}
+.filters .filter-label{ color:var(--txt2); font-size:11px; text-transform:uppercase; letter-spacing:.03em; margin-right:-6px; }
+
+main > .panel{ margin-bottom:16px; }
+.panel{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px; }
+.panel h2{ margin:0 0 14px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--txt2); }
+
+.table-scroll{ max-height:600px; overflow:auto; }
+table{ width:100%; border-collapse:collapse; font-size:13px; }
+th,td{ padding:9px 10px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
+th{ color:var(--txt2); font-weight:600; font-size:11px; text-transform:uppercase; position:sticky; top:0; background:var(--panel); }
+tr:hover td{ background:var(--panel2); }
+td.empty{ color:var(--txt2); text-align:center; padding:24px; }
+tr.total-row td{ font-weight:700; border-top:2px solid var(--border); background:var(--panel2); }
+
+.hint{ color:var(--txt2); font-size:12px; margin-top:10px; }
+
+.print-header{ display:none; }
+
+  @media (max-width:640px){
+header{ padding:14px 16px; }
+main{ padding:14px 12px 40px; }
+  .right-controls .btn{ flex:1 1 auto; text-align:center; }
+}
+
+/* -------- impressão / geração de PDF -------- */
+@media print{
+header .right-controls, .filters-panel .btn, .status{ display:none !important; }
+body{ background:#fff; color:#111; }
+  .panel{ background:#fff; border:1px solid #ccc; }
+  .panel h2{ color:#444; }
+th{ background:#fff; color:#444; position:static; }
+  th,td{ border-bottom:1px solid #ddd; }
+tr:hover td{ background:transparent; }
+tr.total-row td{ background:#f2f2f2; }
+.table-scroll{ max-height:none; overflow:visible; }
+.print-header{ display:block; margin-bottom:14px; }
+.print-header .ptitle{ font-size:18px; font-weight:700; }
+.print-header .psub{ font-size:12px; color:#555; margin-top:4px; }
+}
+</style>
+  </head>
+  <body>
+
+<header>
+  <div>
+  <h1>Totalizador de Meta — por Operador / Dia / Máquina</h1>
+  <div class="sub" id="sourceLabel">carregando…</div>
+  </div>
+  <div class="right-controls">
+  <a href="index.html" class="btn">← Diário de Bordo</a>
+  <button class="btn btn-primary" onclick="exportarPDF()">Exportar PDF</button>
+  <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">conectando…</span></div>
+</div>
+  </header>
+
+  <main>
+
+  <div class="panel filters-panel">
+  <h2>Filtros</h2>
+  <div class="filters">
+  <select id="fLinha" onchange="renderAll()"><option value="">Linha/Máquina: todas</option></select>
+  <select id="fOperador" onchange="renderAll()"><option value="">Operador: todos</option></select>
+  <select id="fOrdemProducao" onchange="renderAll()"><option value="">Ordem de Produção: todas</option></select>
+  <span class="filter-label">Data</span>
+  <input type="date" id="fData" onchange="renderAll()">
+  </div>
+  </div>
+
+  <div class="panel">
+  <div class="print-header" id="printHeader">
+  <div class="ptitle">Totalizador de Meta — por Operador / Dia / Máquina</div>
+  <div class="psub" id="printFiltersLine"></div>
+  </div>
+  <h2>Meta por Operador / Dia / Máquina</h2>
+  <div class="table-scroll">
+  <table id="tblTotal">
+  <thead>
+  <tr>
+  <th>Operador</th>
+  <th>Data</th>
+  <th>Linha/Máquina</th>
+  <th>Registros</th>
+  <th>Produção (UN)</th>
+  <th>Disp. (min)</th>
+  <th>Parada (min)</th>
+  <th>Tempo Total</th>
+  <th>Qtde Prod. Meta</th>
+  <th>Meta Global</th>
+  </tr>
+  </thead>
+  <tbody id="tblTotalBody"></tbody>
+  </table>
+  </div>
+  <div class="hint">
+  Tempo Total = Disp. (min) + Parada (min). Qtde Prod. Meta = soma de (Temp. Ciclo/h ÷ 60) × Disp. (min) de cada registro do grupo. Meta Global = Produção (UN) ÷ Qtde Prod. Meta.
+  </div>
+  </div>
+
+  </main>
+
+  <script>
+  const SHEET_ID = '1HNuF8KBf-k79imE2yNxkCeQKr9r6OyS84VdSHZCLTK0';
+  const GID_MAIN = '1700278622';
+
+let ALL_ROWS = [];
+
+function csvUrl(gid){
+  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}&t=${Date.now()}`;
+    }
+
+function parseCSV(text){
+  const rows = [];
+let row = [], field = '', inQuotes = false;
+for (let i = 0; i < text.length; i++){
+const c = text[i], next = text[i+1];
+if (inQuotes){
+if (c === '"' && next === '"'){ field += '"'; i++; }
+else if (c === '"'){ inQuotes = false; }
+else { field += c; }
+} else {
+if (c === '"'){ inQuotes = true; }
+else if (c === ','){ row.push(field); field = ''; }
+else if (c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; }
+  else if (c === '\r'){ /* skip */ }
+else { field += c; }
+                    }
+}
+if (field.length || row.length){ row.push(field); rows.push(row); }
+if (!rows.length) return {headers: [], data: []};
+const headers = rows[0];
+const data = rows.slice(1).map((r, idx) => {
+const obj = {};
+headers.forEach((h, i) => obj[h.trim()] = r[i] !== undefined ? r[i].trim() : '');
+obj._row = idx + 2;
+return obj;
+}).filter(o => headers.some(h => o[h.trim()] !== ''));
+return {headers: headers.map(h => h.trim()), data};
+}
+
+const num = v => {
+if (v === undefined || v === null || String(v).trim() === '') return null;
+const n = Number(String(v).replace(/\./g, '').replace(',', '.'));
+return Number.isNaN(n) ? (Number(v) || null) : n;
+};
+const fmtNum = (n, d=0) => n == null ? '—' : n.toLocaleString('pt-BR', {minimumFractionDigits:d, maximumFractionDigits:d});
+
+function isoToBR(iso){
+  if (!iso) return '';
+const [y, m, d] = iso.split('-');
+return `${d}/${m}/${y}`;
+}
+
+function parseDateBR(s){
+if (!s) return null;
+const m = String(s).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+if (!m) return null;
+return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+}
+
+function populateSelect(id, values){
+const sel = document.getElementById(id);
+const current = sel.value;
+const placeholder = sel.options[0];
+sel.innerHTML = '';
+sel.appendChild(placeholder);
+values.forEach(v => {
+const opt = document.createElement('option');
+opt.value = v; opt.textContent = v;
+sel.appendChild(opt);
+});
+if (values.includes(current)) sel.value = current;
+}
+
+function uniqueSorted(rows, field){
+return Array.from(new Set(rows.map(r => r[field]).filter(v => v))).sort((a,b) => a.localeCompare(b, 'pt-BR'));
+}
+
+async function refresh(){
+try {
+const res = await fetch(csvUrl(GID_MAIN), {cache:'no-store'});
+if (!res.ok) throw new Error('Falha ao buscar dados da planilha');
+const parsed = parseCSV(await res.text());
+ALL_ROWS = parsed.data.filter(r => r['Data']);
+populateSelect('fLinha', uniqueSorted(ALL_ROWS, 'Linha/Maquina'));
+populateSelect('fOperador', uniqueSorted(ALL_ROWS, 'Operador'));
+populateSelect('fOrdemProducao', uniqueSorted(ALL_ROWS, 'Ordem de produção'));
+document.getElementById('sourceLabel').textContent = `${ALL_ROWS.length} registros · atualizado ${new Date().toLocaleTimeString('pt-BR')}`;
+document.getElementById('statusDot').className = 'dot';
+document.getElementById('statusText').textContent = 'conectado';
+renderAll();
+} catch (e) {
+document.getElementById('statusDot').className = 'dot err';
+document.getElementById('statusText').textContent = 'erro ao conectar';
+console.error(e);
+}
+}
+
+function filteredRows(){
+const fLinha = document.getElementById('fLinha').value;
+const fOperador = document.getElementById('fOperador').value;
+const fOrdem = document.getElementById('fOrdemProducao').value;
+const fData = isoToBR(document.getElementById('fData').value);
+return ALL_ROWS.filter(r =>
+(!fLinha || r['Linha/Maquina'] === fLinha) &&
+(!fOperador || r['Operador'] === fOperador) &&
+(!fOrdem || r['Ordem de produção'] === fOrdem) &&
+(!fData || r['Data'] === fData)
+);
+}
+
+function agrupar(rows){
+const grupos = new Map();
+rows.forEach(r => {
+const key = `${r['Operador']}|||${r['Data']}|||${r['Linha/Maquina']}`;
+if (!grupos.has(key)){
+grupos.set(key, {
+operador: r['Operador'], data: r['Data'], maquina: r['Linha/Maquina'],
+registros: 0, producao: 0, disp: 0, parada: 0, qtdeProdMeta: 0,
+});
+}
+const g = grupos.get(key);
+g.registros++;
+g.producao += num(r['Producao no Turno (Un)']) || 0;
+g.disp += num(r['Disponibilidade (minutos)']) || 0;
+g.parada += num(r['Tempo de Parada (min)']) || 0;
+const tempoCiclo = num(r['Tempo ciclo/hora']) || 0;
+const dispReg = num(r['Disponibilidade (minutos)']) || 0;
+g.qtdeProdMeta += (tempoCiclo / 60) * dispReg;
+});
+return Array.from(grupos.values()).map(g => ({
+...g,
+tempoTotal: g.disp + g.parada,
+metaGlobal: g.qtdeProdMeta > 0 ? (g.producao / g.qtdeProdMeta) : null,
+}));
+}
+
+function renderAll(){
+const rows = filteredRows();
+const grupos = agrupar(rows).sort((a, b) => {
+const da = parseDateBR(a.data), db = parseDateBR(b.data);
+if (da && db && da.getTime() !== db.getTime()) return db - da;
+if (a.operador !== b.operador) return a.operador.localeCompare(b.operador, 'pt-BR');
+return (a.maquina || '').localeCompare(b.maquina || '', 'pt-BR');
+});
+
+const tbody = document.getElementById('tblTotalBody');
+if (!grupos.length){
+tbody.innerHTML = '<tr><td class="empty" colspan="10">Nenhum registro para os filtros selecionados.</td></tr>';
+} else {
+tbody.innerHTML = grupos.map(g => `<tr> <td>${g.operador}</td> <td>${g.data}</td> <td>${g.maquina}</td> <td>${g.registros}</td> <td>${fmtNum(g.producao)}</td> <td>${fmtNum(g.disp)}</td> <td>${fmtNum(g.parada)}</td> <td>${fmtNum(g.tempoTotal)}</td> <td>${fmtNum(g.qtdeProdMeta, 2)}</td> <td>${g.metaGlobal == null ? '—' : fmtNum(g.metaGlobal * 100, 2) + '%'}</td> </tr>`).join('');
+
+const totProducao = grupos.reduce((s, g) => s + g.producao, 0);
+const totDisp = grupos.reduce((s, g) => s + g.disp, 0);
+const totParada = grupos.reduce((s, g) => s + g.parada, 0);
+const totTempoTotal = totDisp + totParada;
+const totQtdeMeta = grupos.reduce((s, g) => s + g.qtdeProdMeta, 0);
+const totRegistros = grupos.reduce((s, g) => s + g.registros, 0);
+const totMetaGlobal = totQtdeMeta > 0 ? (totProducao / totQtdeMeta) : null;
+tbody.innerHTML += `<tr class="total-row"> <td colspan="3">Total geral (${grupos.length} grupo${grupos.length === 1 ? '' : 's'})</td> <td>${totRegistros}</td> <td>${fmtNum(totProducao)}</td> <td>${fmtNum(totDisp)}</td> <td>${fmtNum(totParada)}</td> <td>${fmtNum(totTempoTotal)}</td> <td>${fmtNum(totQtdeMeta, 2)}</td> <td>${totMetaGlobal == null ? '—' : fmtNum(totMetaGlobal * 100, 2) + '%'}</td> </tr>`;
+}
+
+const partes = [];
+const fLinha = document.getElementById('fLinha').value;
+const fOperador = document.getElementById('fOperador').value;
+const fOrdem = document.getElementById('fOrdemProducao').value;
+const fData = document.getElementById('fData').value;
+if (fOperador) partes.push(`Operador: ${fOperador}`);
+if (fData) partes.push(`Data: ${isoToBR(fData)}`);
+if (fLinha) partes.push(`Linha/Máquina: ${fLinha}`);
+if (fOrdem) partes.push(`Ordem de Produção: ${fOrdem}`);
+document.getElementById('printFiltersLine').textContent = partes.length ? `Filtros: ${partes.join(' · ')}` : 'Sem filtros aplicados (todos os registros)';
+}
+
+function exportarPDF(){
+const original = document.title;
+const fOperador = document.getElementById('fOperador').value;
+const fData = document.getElementById('fData').value;
+const partes = ['Totalizador_Meta'];
+if (fOperador) partes.push(fOperador.replace(/\s+/g, '_'));
+if (fData) partes.push(fData);
+document.title = partes.join('_');
+window.print();
+setTimeout(() => { document.title = original; }, 500);
+}
+
+refresh();
+setInterval(refresh, 60000);
+</script>
+
+</body>
+</html>
+
+  
