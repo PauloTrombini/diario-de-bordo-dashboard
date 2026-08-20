@@ -522,7 +522,7 @@ const FIELDS_ALL = [
 'META', 'Tempo ciclo/hora', 'Prod./hora', 'Eff %',
 'Observacoes', 'Descricao da Ocorrencia', 'Causa Raiz',
 'Acao Corretiva', 'Status', 'Responsavel', 'Data de concluão',
-'Hora Inicio OP', 'Hora Fim OP', 'Disponibilidade (minutos)',
+'Hora Inicio OP', 'Hora Fim OP', 'Disponibilidade (minutos)', 'Horas Úteis',
 ];
 
 // Campos calculados por fórmula na própria planilha — nunca aparecem nos
@@ -589,7 +589,7 @@ const COMPUTED_FIELDS = {
 // vez de 90), mantida assim de propósito pra facilitar reajuste futuro.
 // Fórmula com columnLetter() no lugar de "G2"/"U2" fixos, pra sempre
 // aplicar automaticamente em qualquer linha nova/editada.
-'Prod./hora': `=IFERROR((INDIRECT("${columnLetter('Producao no Turno (Un)')}"&ROW())/(INDIRECT("${columnLetter('Disponibilidade (minutos)')}"&ROW())-0))*60;"")`,
+'Prod./hora': `=IFERROR((INDIRECT("${columnLetter('Producao no Turno (Un)')}"&ROW())/(INDIRECT("${columnLetter('Horas Úteis')}"&ROW())-0))*60;"")`,
 // Eff % agora é Prod./hora ÷ Tempo ciclo/hora (antes era Producao/
 // Meta) — mudança de método de cálculo pedida pelo usuário em 2026-07-28.
 'Eff %': `=IFERROR(INDIRECT("${columnLetter('Prod./hora')}"&ROW())/INDIRECT("${columnLetter('Tempo ciclo/hora')}"&ROW());"")`,
@@ -601,6 +601,7 @@ const COMPUTED_FIELDS = {
 // exibição (mostra "—" em vez de "0 min" quando falta um dos dois
 // horários) — ver fmtDisponibilidade/COLUMNS_DETALHE.
 'Disponibilidade (minutos)': `=IFERROR(SUMIFS('Histórico Horários OP'!$G:$G;'Histórico Horários OP'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Horários OP'!$A:$A;INDIRECT("${columnLetter('Data')}"&ROW());'Histórico Horários OP'!$D:$D;INDIRECT("${columnLetter('Operador')}"&ROW()))-VLOOKUP(INDIRECT("${columnLetter('Linha/Maquina')}"&ROW());Metas!$A:$E;5;FALSE)*60;0)`,
+  'Horas Úteis': `=IFERROR(INDIRECT("${columnLetter('Disponibilidade (minutos)')}"&ROW())-INDIRECT("${columnLetter('Tempo de Parada (min)')}"&ROW());"")`,
 };
 
 // Campos exibidos nos formulários de novo registro / edição (todos exceto os calculados).
@@ -667,6 +668,35 @@ const horasUteis = disp - parada;
 return `${fmtNum((horasUteis / disp) * 100, 2)}%`;
 }
 
+// OEE (%) = Eff % × Disp Eff% — coluna nova (pedido do usuário), calculada
+// só no dashboard, mesmo padrão da Horas Úteis/Disp Eff% acima.
+function fmtOEE(r){
+  if (!hasHorarioEntries(r)) return '—';
+  const eff = num(r['Eff %']);
+  const disp = num(r['Disponibilidade (minutos)']);
+  if (eff == null || disp == null || disp === 0) return '—';
+  const parada = num(r['Tempo de Parada (min)']) || 0;
+  const dispEffPct = ((disp - parada) / disp) * 100;
+  return `${fmtNum((eff * dispEffPct) / 100, 1)}%`;
+}
+
+// Início OP / Fim OP — em vez de ler o campo antigo (S/T) da própria linha
+// do Diário (que não é mais preenchido desde que o lançamento passou a ser
+// por múltiplos horários na aba Histórico Horários OP), busca o menor
+// horário de início e o maior horário de fim entre os lançamentos da
+// Ordem+Data+Operador desta linha.
+function horarioEntriesFor(r){
+  return RAW_HORARIOS_ROWS.filter(h => h['Ordem de Produção'] === r['Ordem de produção'] && h['Data'] === r['Data'] && (h['Operador'] || '') === (r['Operador'] || ''));
+}
+function fmtHoraInicioOP(r){
+  const horas = horarioEntriesFor(r).map(h => h['Hora Início OP']).filter(Boolean).sort();
+  return horas[0] || '—';
+}
+function fmtHoraFimOP(r){
+  const horas = horarioEntriesFor(r).map(h => h['Hora Fim OP']).filter(Boolean).sort();
+  return horas.length ? horas[horas.length - 1] : '—';
+}
+
 // Dashboard 1 — "Detalhe Diário de Bordo": vai de Data até Observações (o
 // núcleo operacional do registro: quem, onde, quanto produziu, meta, Eff%,
 // parada, e agora também o início/fim da OP e a Disponibilidade calculada),
@@ -685,12 +715,12 @@ const COLUMNS_DETALHE = [
 { key: 'Prod./hora', label: 'Prod./h', render: fmtProdutividade },
 { key: 'Eff %', label: 'Eff %' },
 { key: 'Disp Eff%', label: 'Disp Eff%', render: fmtDispEff },
-{ key: 'Hora Inicio OP', label: 'Início OP' },
-{ key: 'Hora Fim OP', label: 'Fim OP' },
+{ key: 'OEE (%)', label: 'OEE (%)', render: fmtOEE },
+{ key: 'Hora Inicio OP', label: 'Início OP', render: fmtHoraInicioOP },
+{ key: 'Hora Fim OP', label: 'Fim OP', render: fmtHoraFimOP },
 { key: 'Disponibilidade (minutos)', label: 'Disp. (min)', render: fmtDisponibilidade },
 { key: 'Tempo de Parada (min)', label: 'Parada (min)' },
 { key: 'Horas Uteis', label: 'Horas Úteis', render: fmtHorasUteis },
-{ key: 'Observacoes', label: 'Observações', wrap: true },
 ];
 
 // Dashboard 2 — "TPM": foco em causa raiz / ação corretiva das ocorrências,
