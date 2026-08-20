@@ -600,7 +600,7 @@ const COMPUTED_FIELDS = {
 // calcula (célula vazia vira 0 no Sheets), então o dashboard trata isso na
 // exibição (mostra "—" em vez de "0 min" quando falta um dos dois
 // horários) — ver fmtDisponibilidade/COLUMNS_DETALHE.
-'Disponibilidade (minutos)': `=IFERROR(SUMIFS('Histórico Horários OP'!$G:$G;'Histórico Horários OP'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Horários OP'!$A:$A;INDIRECT("${columnLetter('Data')}"&ROW());'Histórico Horários OP'!$D:$D;INDIRECT("${columnLetter('Operador')}"&ROW()))+SUMIFS('Histórico Paradas'!$L:$L;'Histórico Paradas'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Paradas'!$A:$A;INDIRECT("${columnLetter('Data')}"&ROW()));0)`,
+'Disponibilidade (minutos)': `=IFERROR(SUMIFS('Histórico Horários OP'!$G:$G;'Histórico Horários OP'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Horários OP'!$A:$A;INDIRECT("${columnLetter('Data')}"&ROW());'Histórico Horários OP'!$D:$D;INDIRECT("${columnLetter('Operador')}"&ROW()))-VLOOKUP(INDIRECT("${columnLetter('Linha/Maquina')}"&ROW());Metas!$A:$E;5;FALSE)*60;0)`,
 };
 
 // Campos exibidos nos formulários de novo registro / edição (todos exceto os calculados).
