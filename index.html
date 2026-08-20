@@ -670,14 +670,18 @@ return `${fmtNum((horasUteis / disp) * 100, 2)}%`;
 
 // OEE (%) = Eff % × Disp Eff% — coluna nova (pedido do usuário), calculada
 // só no dashboard, mesmo padrão da Horas Úteis/Disp Eff% acima.
-function fmtOEE(r){
-  if (!hasHorarioEntries(r)) return '—';
+function oeeValue(r){
+  if (!hasHorarioEntries(r)) return null;
   const eff = effRatio(r['Eff %']);
   const disp = num(r['Disponibilidade (minutos)']);
-  if (eff == null || disp == null || disp === 0) return '—';
+  if (eff == null || disp == null || disp === 0) return null;
   const parada = num(r['Tempo de Parada (min)']) || 0;
   const dispEffPct = ((disp - parada) / disp) * 100;
-  return `${fmtNum((eff * dispEffPct) / 100, 1)}%`;
+  return (eff * dispEffPct) / 100;
+}
+function fmtOEE(r){
+  const oee = oeeValue(r);
+  return oee == null ? '—' : `${fmtNum(oee, 1)}%`;
 }
 
 // Início OP / Fim OP — em vez de ler o campo antigo (S/T) da própria linha
@@ -1474,7 +1478,7 @@ ${editing ? `<button class="btn icon-btn" title="Editar" onclick="openEditModal(
 // O destaque verde/amarelo/vermelho por Eff % só faz sentido no dashboard
 // Detalhe (é o indicador de atingimento de meta) — no TPM, que não mostra
 // Eff%, colorir a linha da mesma forma ficaria sem contexto/confuso.
-const rowCls = colorByEff ? effRowClass(r['Eff %']) : '';
+const rowCls = colorByEff ? effRowClass(oeeValue(r)) : '';
 return `<tr${rowCls ? ` class="${rowCls}"` : ''}>${cells}${actions}</tr>`;
 }).join('');
 }
