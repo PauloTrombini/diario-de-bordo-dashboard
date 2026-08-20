@@ -335,7 +335,7 @@ window.print();
 setTimeout(() => { document.title = original; }, 500);
 }
 
-loadFaixasEff();refresh();setInterval(loadFaixasEff, 300000);
+loadFaixasEff().then(refresh);setInterval(loadFaixasEff, 300000);
 setInterval(refresh, 60000);
 </script>
 
