@@ -672,7 +672,7 @@ return `${fmtNum((horasUteis / disp) * 100, 2)}%`;
 // só no dashboard, mesmo padrão da Horas Úteis/Disp Eff% acima.
 function fmtOEE(r){
   if (!hasHorarioEntries(r)) return '—';
-  const eff = num(r['Eff %']);
+  const eff = effRatio(r['Eff %']);
   const disp = num(r['Disponibilidade (minutos)']);
   if (eff == null || disp == null || disp === 0) return '—';
   const parada = num(r['Tempo de Parada (min)']) || 0;
