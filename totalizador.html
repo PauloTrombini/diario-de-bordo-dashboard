@@ -86,7 +86,7 @@ tr.total-row td{ background:#f2f2f2; }
   <h1>Totalizador de Meta — por Operador / Dia / Máquina</h1>
   <div class="sub" id="sourceLabel">carregando…</div>
   </div>
-  <div class="kpi-meta-global" id="kpiMetaGlobal"><div class="kpi-label">Meta Global</div><div class="kpi-value" id="kpiMetaGlobalValue">—</div></div><div class="right-controls">
+  <div class="kpi-meta-global" id="kpiOeeGlobal"><div class="kpi-label">OEE Global</div><div class="kpi-value" id="kpiOeeGlobalValue">—</div></div><div class="right-controls">
   <a href="index.html" class="btn">← Diário de Bordo</a>
   <button class="btn btn-primary" onclick="exportarPDF()">Exportar PDF</button>
   <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">conectando…</span></div>
@@ -125,14 +125,16 @@ tr.total-row td{ background:#f2f2f2; }
   <th>Parada (min)</th>
   <th>Tempo Total</th>
   <th>Qtde Prod. Meta</th>
-  <th>Meta Global</th>
+  <th>Eff % Global</th>
+  <th>Disp Eff% Global</th>
+  <th>OEE % Global</th>
   </tr>
   </thead>
   <tbody id="tblTotalBody"></tbody>
   </table>
   </div>
   <div class="hint">
-  Tempo Total = Disp. (min) + Parada (min). Qtde Prod. Meta = soma de (Temp. Ciclo/h ÷ 60) × Disp. (min) de cada registro do grupo. Meta Global = Produção (UN) ÷ Qtde Prod. Meta.
+  Tempo Total = Disp. (min) + Parada (min). Qtde Prod. Meta = soma de (Temp. Ciclo/h ÷ 60) × Horas Úteis de cada registro do grupo. Eff % Global = Produção (UN) ÷ Qtde Prod. Meta. Disp Eff% Global = 1 − (Parada (min) ÷ Disp. (min)). OEE % Global = Eff % Global × Disp Eff% Global.
   </div>
   </div>
 
@@ -264,14 +266,21 @@ g.producao += num(r['Producao no Turno (Un)']) || 0;
 g.disp += num(r['Disponibilidade (minutos)']) || 0;
 g.parada += num(r['Tempo de Parada (min)']) || 0;
 const tempoCiclo = num(r['Tempo ciclo/hora']) || 0;
-const dispReg = num(r['Disponibilidade (minutos)']) || 0;
-g.qtdeProdMeta += (tempoCiclo / 60) * dispReg;
+const horasUteisReg = num(r['Horas Úteis']) || 0;
+g.qtdeProdMeta += (tempoCiclo / 60) * horasUteisReg;
 });
-return Array.from(grupos.values()).map(g => ({
-...g,
-tempoTotal: g.disp + g.parada,
-metaGlobal: g.qtdeProdMeta > 0 ? (g.producao / g.qtdeProdMeta) : null,
-}));
+return Array.from(grupos.values()).map(g => {
+  const effGlobal = g.qtdeProdMeta > 0 ? (g.producao / g.qtdeProdMeta) : null;
+  const dispEffGlobal = g.disp > 0 ? (1 - g.parada / g.disp) : null;
+  const oeeGlobal = (effGlobal != null && dispEffGlobal != null) ? (effGlobal * dispEffGlobal) : null;
+  return {
+    ...g,
+    tempoTotal: g.disp + g.parada,
+    effGlobal,
+    dispEffGlobal,
+    oeeGlobal,
+  };
+});
 }
 
 function renderAll(){
@@ -283,11 +292,11 @@ if (a.operador !== b.operador) return a.operador.localeCompare(b.operador, 'pt-B
 return (a.maquina || '').localeCompare(b.maquina || '', 'pt-BR');
 });
 
-const tbody = document.getElementById('tblTotalBody');let totMetaGlobalOuter = null;
+const tbody = document.getElementById('tblTotalBody');let totOeeGlobalOuter = null;
 if (!grupos.length){
-tbody.innerHTML = '<tr><td class="empty" colspan="10">Nenhum registro para os filtros selecionados.</td></tr>';
+tbody.innerHTML = '<tr><td class="empty" colspan="12">Nenhum registro para os filtros selecionados.</td></tr>';
 } else {
-tbody.innerHTML = grupos.map(g => `<tr> <td>${g.operador}</td> <td>${g.data}</td> <td>${g.maquina}</td> <td>${g.registros}</td> <td>${fmtNum(g.producao)}</td> <td>${fmtNum(g.disp)}</td> <td>${fmtNum(g.parada)}</td> <td>${fmtNum(g.tempoTotal)}</td> <td>${fmtNum(g.qtdeProdMeta, 2)}</td> <td>${g.metaGlobal == null ? '—' : fmtNum(g.metaGlobal * 100, 2) + '%'}</td> </tr>`).join('');
+tbody.innerHTML = grupos.map(g => `<tr> <td>${g.operador}</td> <td>${g.data}</td> <td>${g.maquina}</td> <td>${g.registros}</td> <td>${fmtNum(g.producao)}</td> <td>${fmtNum(g.disp)}</td> <td>${fmtNum(g.parada)}</td> <td>${fmtNum(g.tempoTotal)}</td> <td>${fmtNum(g.qtdeProdMeta, 2)}</td> <td>${g.effGlobal == null ? '—' : fmtNum(g.effGlobal * 100, 2) + '%'}</td> <td>${g.dispEffGlobal == null ? '—' : fmtNum(g.dispEffGlobal * 100, 2) + '%'}</td> <td>${g.oeeGlobal == null ? '—' : fmtNum(g.oeeGlobal * 100, 2) + '%'}</td> </tr>`).join('');
 
 const totProducao = grupos.reduce((s, g) => s + g.producao, 0);
 const totDisp = grupos.reduce((s, g) => s + g.disp, 0);
@@ -295,8 +304,11 @@ const totParada = grupos.reduce((s, g) => s + g.parada, 0);
 const totTempoTotal = totDisp + totParada;
 const totQtdeMeta = grupos.reduce((s, g) => s + g.qtdeProdMeta, 0);
 const totRegistros = grupos.reduce((s, g) => s + g.registros, 0);
-const totMetaGlobal = totQtdeMeta > 0 ? (totProducao / totQtdeMeta) : null;totMetaGlobalOuter = totMetaGlobal;
-tbody.innerHTML += `<tr class="total-row"> <td colspan="3">Total geral (${grupos.length} grupo${grupos.length === 1 ? '' : 's'})</td> <td>${totRegistros}</td> <td>${fmtNum(totProducao)}</td> <td>${fmtNum(totDisp)}</td> <td>${fmtNum(totParada)}</td> <td>${fmtNum(totTempoTotal)}</td> <td>${fmtNum(totQtdeMeta, 2)}</td> <td>${totMetaGlobal == null ? '—' : fmtNum(totMetaGlobal * 100, 2) + '%'}</td> </tr>`;
+const totEffGlobal = totQtdeMeta > 0 ? (totProducao / totQtdeMeta) : null;
+const totDispEffGlobal = totDisp > 0 ? (1 - totParada / totDisp) : null;
+const totOeeGlobal = (totEffGlobal != null && totDispEffGlobal != null) ? (totEffGlobal * totDispEffGlobal) : null;
+totOeeGlobalOuter = totOeeGlobal;
+tbody.innerHTML += `<tr class="total-row"> <td colspan="3">Total geral (${grupos.length} grupo${grupos.length === 1 ? '' : 's'})</td> <td>${totRegistros}</td> <td>${fmtNum(totProducao)}</td> <td>${fmtNum(totDisp)}</td> <td>${fmtNum(totParada)}</td> <td>${fmtNum(totTempoTotal)}</td> <td>${fmtNum(totQtdeMeta, 2)}</td> <td>${totEffGlobal == null ? '—' : fmtNum(totEffGlobal * 100, 2) + '%'}</td> <td>${totDispEffGlobal == null ? '—' : fmtNum(totDispEffGlobal * 100, 2) + '%'}</td> <td>${totOeeGlobal == null ? '—' : fmtNum(totOeeGlobal * 100, 2) + '%'}</td> </tr>`;
 }
 
 const partes = [];
@@ -308,7 +320,7 @@ if (fOperador) partes.push(`Operador: ${fOperador}`);
 const fPeriodo = document.getElementById('fPeriodo').value;if (fData && fPeriodo === 'semana'){const rg = getWeekRange(new Date(fData + 'T00:00:00'));partes.push(`Semana: ${rg.start.toLocaleDateString('pt-BR')} a ${rg.end.toLocaleDateString('pt-BR')}`);} else if (fData && fPeriodo === 'mes'){partes.push(`Mês: ${new Date(fData + 'T00:00:00').toLocaleDateString('pt-BR', {month:'long', year:'numeric'})}`);} else if (fData){partes.push(`Data: ${isoToBR(fData)}`);}
 if (fLinha) partes.push(`Linha/Máquina: ${fLinha}`);
 if (fOrdem) partes.push(`Ordem de Produção: ${fOrdem}`);
-document.getElementById('printFiltersLine').textContent = partes.length ? `Filtros: ${partes.join(' · ')}` : 'Sem filtros aplicados (todos os registros)';const kpiEl = document.getElementById('kpiMetaGlobalValue');const kpiBox = document.getElementById('kpiMetaGlobal');if (totMetaGlobalOuter != null){const pct = totMetaGlobalOuter * 100;kpiEl.textContent = fmtNum(pct, 2) + '%';kpiBox.className = 'kpi-meta-global ' + faixaClassFor(pct);} else {kpiEl.textContent = '—';kpiBox.className = 'kpi-meta-global';}
+document.getElementById('printFiltersLine').textContent = partes.length ? `Filtros: ${partes.join(' · ')}` : 'Sem filtros aplicados (todos os registros)';const kpiEl = document.getElementById('kpiOeeGlobalValue');const kpiBox = document.getElementById('kpiOeeGlobal');if (totOeeGlobalOuter != null){const pct = totOeeGlobalOuter * 100;kpiEl.textContent = fmtNum(pct, 2) + '%';kpiBox.className = 'kpi-meta-global ' + faixaClassFor(pct);} else {kpiEl.textContent = '—';kpiBox.className = 'kpi-meta-global';}
 }
 
 function exportarPDF(){
