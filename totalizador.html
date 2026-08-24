@@ -346,6 +346,24 @@ document.title = partes.join('_');
 window.print();
 setTimeout(() => { document.title = original; }, 500);
 }
+function toast(msg, isError){
+  let el = document.getElementById('toastMsg');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'toastMsg';
+    el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' +
+      'max-width:90vw;padding:12px 18px;border-radius:8px;font-size:14px;z-index:9999;' +
+      'box-shadow:0 4px 16px rgba(0,0,0,.35);transition:opacity .2s;';
+    document.body.appendChild(el);
+  }
+  el.style.background = isError ? 'var(--red)' : 'var(--green)';
+  el.style.color = '#0b0b0b';
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.style.opacity = '0'; }, 4500);
+}
+
 async function enviarRelatorioTelegram(){
   const btn = document.getElementById('btnRelatorioTelegram');
   const original = btn.textContent;
@@ -356,14 +374,14 @@ async function enviarRelatorioTelegram(){
     const res = await fetch(url);
     const dados = await res.json();
     if (dados.ok && dados.enviados > 0){
-      alert('Relatorio enviado para ' + dados.enviados + ' destinatario(s) no Telegram.');
+      toast('Relatorio enviado para ' + dados.enviados + ' destinatario(s) no Telegram.');
     } else if (dados.ok && dados.enviados === 0){
-      alert('Nenhum destinatario configurado ainda (PRODUCAO_CHAT_IDS na planilha do CRM Telegram).');
+      toast('Nenhum destinatario configurado ainda (PRODUCAO_CHAT_IDS na planilha do CRM Telegram).', true);
     } else {
-      alert('Falha ao enviar: ' + (dados.erro || 'erro desconhecido'));
+      toast('Falha ao enviar: ' + (dados.erro || 'erro desconhecido'), true);
     }
   } catch (e){
-    alert('Falha ao enviar relatorio: ' + e.message);
+    toast('Falha ao enviar relatorio: ' + e.message, true);
   } finally {
     btn.disabled = false;
     btn.textContent = original;
@@ -378,12 +396,12 @@ async function alterarFrequenciaRelatorio(){
     const res = await fetch(url);
     const dados = await res.json();
     if (dados.ok){
-      alert('Frequencia do relatorio ajustada para a cada ' + dados.horas + 'h.');
+      toast('Frequencia do relatorio ajustada para a cada ' + dados.horas + 'h.');
     } else {
-      alert('Falha ao ajustar frequencia: ' + (dados.erro || 'erro desconhecido'));
+      toast('Falha ao ajustar frequencia: ' + (dados.erro || 'erro desconhecido'), true);
     }
   } catch (e){
-    alert('Falha ao ajustar frequencia: ' + e.message);
+    toast('Falha ao ajustar frequencia: ' + e.message, true);
   }
 }
 
