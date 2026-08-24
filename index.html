@@ -750,6 +750,12 @@ return idx < 0 ? '' : String.fromCharCode(65 + idx);
 // 60%–74,9% amarelo, <60% vermelho. Aceita "107,33%" ou "0.75" etc.
 function effRatio(v){
 if (v === undefined || v === null || String(v).trim() === '') return null;
+// Numero bruto (ex: vindo de oeeValue(r)) ja esta na escala percentual
+// correta (ex: 41.9) - nao deve passar pelo parser de string BR abaixo,
+// que removeria o ponto decimal e o transformaria em 419.
+if (typeof v === 'number') {
+  return Number.isNaN(v) ? null : v;
+}
 const cleaned = String(v).trim().replace('%', '').replace(/\./g, '').replace(',', '.');
 const n = Number(cleaned);
 if (Number.isNaN(n)) return null;
