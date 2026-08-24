@@ -89,6 +89,16 @@ tr.total-row td{ background:#f2f2f2; }
   <div class="kpi-meta-global" id="kpiOeeGlobal"><div class="kpi-label">OEE Global</div><div class="kpi-value" id="kpiOeeGlobalValue">—</div></div><div class="right-controls">
   <a href="index.html" class="btn">← Diário de Bordo</a>
   <button class="btn btn-primary" onclick="exportarPDF()">Exportar PDF</button>
+  <button class="btn" onclick="enviarRelatorioTelegram()" id="btnRelatorioTelegram">Enviar Relatorio Telegram</button>
+  <select id="selFrequenciaRelatorio" onchange="alterarFrequenciaRelatorio()" title="Frequencia do relatorio automatico no Telegram">
+  <option value="1">A cada 1h</option>
+  <option value="2">A cada 2h</option>
+  <option value="4" selected>A cada 4h</option>
+  <option value="6">A cada 6h</option>
+  <option value="8">A cada 8h</option>
+  <option value="12">A cada 12h</option>
+  <option value="24">1x por dia</option>
+  </select>
   <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">conectando…</span></div>
 </div>
   </header>
@@ -143,6 +153,8 @@ tr.total-row td{ background:#f2f2f2; }
   <script>
   const SHEET_ID = '1HNuF8KBf-k79imE2yNxkCeQKr9r6OyS84VdSHZCLTK0';
   const GID_MAIN = '1700278622';
+  const PRODUCAO_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxohe-o_vHtwYLQf5dE8XM0S4iH6FGqTmfllCJSk-GoyVKgVwiCR8Tif_DX4ynGZISXFw/exec';
+  const PRODUCAO_PK = 'b206927e-b2d0-4759-839c-e9a2fc54446930f9ba4b';
 
 let ALL_ROWS = [];const GID_FAIXAS = '1163084855';let FAIXAS_EFF = [];
 
@@ -334,6 +346,47 @@ document.title = partes.join('_');
 window.print();
 setTimeout(() => { document.title = original; }, 500);
 }
+async function enviarRelatorioTelegram(){
+  const btn = document.getElementById('btnRelatorioTelegram');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Enviando...';
+  try {
+    const url = PRODUCAO_WEBAPP_URL + '?pk=' + encodeURIComponent(PRODUCAO_PK) + '&acao=relatorioProducao';
+    const res = await fetch(url);
+    const dados = await res.json();
+    if (dados.ok && dados.enviados > 0){
+      alert('Relatorio enviado para ' + dados.enviados + ' destinatario(s) no Telegram.');
+    } else if (dados.ok && dados.enviados === 0){
+      alert('Nenhum destinatario configurado ainda (PRODUCAO_CHAT_IDS na planilha do CRM Telegram).');
+    } else {
+      alert('Falha ao enviar: ' + (dados.erro || 'erro desconhecido'));
+    }
+  } catch (e){
+    alert('Falha ao enviar relatorio: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+async function alterarFrequenciaRelatorio(){
+  const sel = document.getElementById('selFrequenciaRelatorio');
+  const horas = sel.value;
+  try {
+    const url = PRODUCAO_WEBAPP_URL + '?pk=' + encodeURIComponent(PRODUCAO_PK) + '&acao=configFrequencia&horas=' + encodeURIComponent(horas);
+    const res = await fetch(url);
+    const dados = await res.json();
+    if (dados.ok){
+      alert('Frequencia do relatorio ajustada para a cada ' + dados.horas + 'h.');
+    } else {
+      alert('Falha ao ajustar frequencia: ' + (dados.erro || 'erro desconhecido'));
+    }
+  } catch (e){
+    alert('Falha ao ajustar frequencia: ' + e.message);
+  }
+}
+
 
 loadFaixasEff().then(refresh);setInterval(loadFaixasEff, 300000);
 setInterval(refresh, 60000);
