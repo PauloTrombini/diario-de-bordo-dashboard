@@ -108,7 +108,7 @@ tr.total-row td{ background:#f2f2f2; }
   <button class="btn btn-primary" onclick="exportarPDF()">Exportar PDF</button>
   <button class="btn" onclick="enviarRelatorioTelegram()" id="btnRelatorioTelegram">Enviar Relatorio Telegram</button>
   <button class="btn" onclick="abrirDestinatarios()" id="btnDestinatarios">Destinatários</button>
-  <select id="selFrequenciaRelatorio" onchange="alterarFrequenciaRelatorio()" title="Frequencia do relatorio automatico no Telegram">
+  <select id="selFrequenciaRelatorio" onchange="onFrequenciaChange()" title="Frequencia do relatorio automatico no Telegram">
   <option value="1">A cada 1h</option>
   <option value="2">A cada 2h</option>
   <option value="4" selected>A cada 4h</option>
@@ -117,6 +117,7 @@ tr.total-row td{ background:#f2f2f2; }
   <option value="12">A cada 12h</option>
   <option value="24">1x por dia</option>
   </select>
+  <select id="selHoraRelatorio" onchange="alterarFrequenciaRelatorio()" title="Horario de envio (1x por dia)" style="display:none;"></select>
   <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">conectando…</span></div>
 </div>
   </header>
@@ -406,15 +407,56 @@ async function enviarRelatorioTelegram(){
   }
 }
 
-async function alterarFrequenciaRelatorio(){
+function popularHoras(){
+  const sel = document.getElementById('selHoraRelatorio');
+  sel.innerHTML = '';
+  for (let h = 0; h < 24; h++){
+    const opt = document.createElement('option');
+    opt.value = String(h);
+    opt.textContent = String(h).padStart(2, '0') + 'h';
+    sel.appendChild(opt);
+  }
+}
+
+function onFrequenciaChange(){
   const sel = document.getElementById('selFrequenciaRelatorio');
-  const horas = sel.value;
+  document.getElementById('selHoraRelatorio').style.display = (sel.value === '24') ? 'inline-block' : 'none';
+  alterarFrequenciaRelatorio();
+}
+
+async function carregarFrequenciaAtual(){
   try {
-    const url = PRODUCAO_WEBAPP_URL + '?pk=' + encodeURIComponent(PRODUCAO_PK) + '&acao=configFrequencia&horas=' + encodeURIComponent(horas);
+    const url = PRODUCAO_WEBAPP_URL + '?pk=' + encodeURIComponent(PRODUCAO_PK) + '&acao=freqAtual';
     const res = await fetch(url);
     const dados = await res.json();
     if (dados.ok){
-      toast('Frequencia do relatorio ajustada para a cada ' + dados.horas + 'h.');
+      document.getElementById('selFrequenciaRelatorio').value = String(dados.horas);
+      document.getElementById('selHoraRelatorio').value = String(dados.hora);
+      document.getElementById('selHoraRelatorio').style.display = (Number(dados.horas) === 24) ? 'inline-block' : 'none';
+    }
+  } catch (e){
+    console.error('Falha ao carregar frequencia atual do relatorio', e);
+  }
+}
+
+async function alterarFrequenciaRelatorio(){
+  const sel = document.getElementById('selFrequenciaRelatorio');
+  const horas = sel.value;
+  const horaSel = document.getElementById('selHoraRelatorio');
+  const isDiario = horas === '24';
+  try {
+    let url = PRODUCAO_WEBAPP_URL + '?pk=' + encodeURIComponent(PRODUCAO_PK) + '&acao=configFrequencia&horas=' + encodeURIComponent(horas);
+    if (isDiario){
+      url += '&hora=' + encodeURIComponent(horaSel.value);
+    }
+    const res = await fetch(url);
+    const dados = await res.json();
+    if (dados.ok){
+      if (isDiario){
+        toast('Relatorio diario configurado para as ' + String(dados.hora).padStart(2, '0') + 'h.');
+      } else {
+        toast('Frequencia do relatorio ajustada para a cada ' + dados.horas + 'h.');
+      }
     } else {
       toast('Falha ao ajustar frequencia: ' + (dados.erro || 'erro desconhecido'), true);
     }
@@ -530,7 +572,10 @@ async function adicionarDescoberto(chatId, nome){
 }
 
 
-loadFaixasEff().then(refresh);setInterval(loadFaixasEff, 300000);
+popularHoras();
+loadFaixasEff().then(refresh);
+carregarFrequenciaAtual();
+setInterval(loadFaixasEff, 300000);
 setInterval(refresh, 60000);
 </script>
 
@@ -554,5 +599,3 @@ setInterval(refresh, 60000);
 </div>
 </body>
 </html>
-
-  
