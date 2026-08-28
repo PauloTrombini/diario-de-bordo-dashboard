@@ -566,7 +566,7 @@ const COMPUTED_FIELDS = {
 // dia). Esta constante é reaplicada TODA VEZ que um registro é
 // criado/editado (buildRowValues), então precisa ficar em sincronia com
 // TAB_PARADAS ou o total volta a zerar no próximo salvamento.
-'Tempo de Parada (min)': `=IFERROR(SUMIFS('Histórico Paradas'!$J:$J;'Histórico Paradas'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Paradas'!$A:$A;INDIRECT("${columnLetter('Data')}"&ROW());'Histórico Paradas'!$D:$D;INDIRECT("${columnLetter('Operador')}"&ROW()));0)`,
+'Tempo de Parada (min)': `=IFERROR(SUMIFS('Histórico Paradas'!$J:$J;'Histórico Paradas'!$B:$B;INDIRECT("${columnLetter('Ordem de produção')}"&ROW());'Histórico Paradas'!$A:$A;INDIRECT("${columnLetter('Data')}"&ROW());'Histórico Paradas'!$D:$D;INDIRECT("${columnLetter('Operador')}"&ROW());'Histórico Paradas'!$M:$M;1);0)`,
 // META vem da aba "Metas" (Linha/Maquina -> Meta, coluna F/6ª da aba
 // Metas), por VLOOKUP na Linha/Maquina desta mesma linha — fórmula mantida
 // idêntica à que já existia na planilha (confirmada em 2026-07-28), só
