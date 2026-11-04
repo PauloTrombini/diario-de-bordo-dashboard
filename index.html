@@ -1107,7 +1107,7 @@ const ordemProducao = document.getElementById('fOrdemProducao').value;
 const base = rows.filter(r =>
 (!linha || sameKeyBR(r['Linha/Maquina'], linha)) &&
 (!operador || sameKeyBR(r['Operador'], operador)) &&
-(!ordemProducao || sameKeyBR(r['Ordem de Produção'], ordemProducao))
+(!ordemProducao || sameKeyBR(r['Ordem de produção'], ordemProducao))
 );
 return applyPeriodFilter(base);
 }
